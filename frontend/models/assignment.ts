@@ -2,6 +2,7 @@ import * as ko from 'knockout';
 import {Model, ModelJson, ModelStore} from "./model";
 import {capitalize, TwoWayReadonlyMap} from "../components/plugins";
 import {ajax_get} from "../components/ajax";
+import {AssignmentGroup, AssignmentGroupJson} from "./assignment_group";
 
 export interface AssignmentJson extends ModelJson {
     id: number;
@@ -53,6 +54,9 @@ export class Assignment extends Model<AssignmentJson> {
     courseId: KnockoutObservable<number>;
     version: KnockoutObservable<number>;
 
+    title: KnockoutReadonlyComputed<string>;
+    group: KnockoutObservable<AssignmentGroup|null>;
+
     FIELDS: TwoWayReadonlyMap = new TwoWayReadonlyMap({
         "name": "name",
         "url": "url",
@@ -80,7 +84,15 @@ export class Assignment extends Model<AssignmentJson> {
 
     constructor(data: AssignmentJson) {
         super(data);
+        this.group = ko.observable<AssignmentGroup>(null);
         this.koFromJson(data);
+        this.title = ko.pureComputed<string>(() => {
+            if (this.type().toLowerCase() === "maze") {
+                return "Maze "+this.name();
+            } else {
+                return this.name();
+            }
+        }, this);
     }
 }
 
@@ -128,6 +140,32 @@ export class AssignmentStore extends ModelStore<AssignmentJson, Assignment> {
 
     getLocalStorageKey(): string {
         return `BLOCKPY_COURSE_${this.courseId}_ASSIGNMENTS`;
+    }
+
+
+    getAllAvailable() {
+        let payload = this.getPayload();
+        let url = this.getUrl();
+        return new Promise((resolve, reject) => {
+            ajax_get(url, payload).then((data) => {
+                if (data.success) {
+                    let assignments: AssignmentJson[] = data.assignments;
+                    let groups: AssignmentGroupJson[] = data.groups;
+                    let created: Assignment[] = [];
+                    for (let i=0; i<assignments.length; i+= 1) {
+                        let assignment = this.newInstance(assignments[i]);
+                        if (groups[i] !== null) {
+                            let group = this.server.assignmentGroupStore.newInstance(groups[i]);
+                            assignment.group(group);
+                        }
+                        created.push(assignment);
+                    }
+                    resolve(created);
+                } else {
+                    reject(data);
+                }
+            });
+        });
     }
 }
 

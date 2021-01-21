@@ -2,6 +2,7 @@ import * as ko from 'knockout';
 import {TwoWayReadonlyMap} from "../components/plugins";
 import {ajax_get} from "../components/ajax";
 import {prettyPrintDateTime} from "../components/dates";
+import {Server} from "../components/server";
 
 export interface ModelJson {
     id: number;
@@ -62,14 +63,17 @@ export function dateCreatedSorter<J extends ModelJson, L extends Model<J>>(left:
 
 
 export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
-    private readonly data: Record<number, T>;
+    protected readonly data: Record<number, T>;
     protected courseId: number|null;
 
     private timer: number;
     private delayedData: T[];
 
-    constructor(courseId: number|null, initialIds: number[], initialData: J[]) {
+    protected readonly server: Server;
+
+    constructor(server: Server, courseId: number|null, initialIds: number[], initialData: J[]) {
         this.data = {};
+        this.server = server;
         this.courseId = courseId;
         this.delayedData = [];
         this.timer = null;
@@ -125,12 +129,16 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
                     let created = results.map( (modelJson: J) => {
                         return this.newInstance(modelJson);
                     });
-                    resolve(created);
+                    resolve(this.cleanData(created));
                 } else {
                     reject(data);
                 }
             });
         });
+    }
+
+    cleanData(models: T[]): T[] {
+        return models;
     }
 
     /**
@@ -157,6 +165,10 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
     abstract getPayload(): any;
     abstract makeEmptyInstance(id: number): T;
     abstract GET_FIELD: string;
+
+    sortMethod(left: T, right: T): number {
+        return 0;
+    }
 
     finishDelayedLoads() {
         let payload = this.getPayload();

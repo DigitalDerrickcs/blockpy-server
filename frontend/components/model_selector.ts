@@ -1,11 +1,12 @@
 import * as ko from 'knockout';
 import {Model, ModelJson, ModelStore} from "../models/model";
-import {User, UserJson} from "../models/user";
+import {User, UserJson, UserStore} from "../models/user";
 import {areArraysEqualSets, pushObservableArray} from "./plugins";
 import {Assignment, AssignmentJson} from "../models/assignment";
 
 // TODO: "Add all" and "Remove all" buttons for Set menu
 // TODO: If only one available, then collapse everything to just the one
+// TODO: Preload all groups/roles as default groups
 
 interface ModelSetJson {
     name: string;
@@ -63,7 +64,7 @@ export class ModelSetSelector<J extends ModelJson, T extends Model<J>> {
 
     private readonly editorVisible: KnockoutObservable<boolean>;
     private readonly selectMode: KnockoutObservable<SelectMode>;
-    private readonly available: KnockoutObservableArray<T>;
+    protected readonly available: KnockoutObservableArray<T>;
     private readonly selectedOptions: KnockoutObservableArray<number>;
     private readonly singleSet: KnockoutObservable<ModelSet>;
     private readonly singleOption: KnockoutObservable<number>;
@@ -72,6 +73,8 @@ export class ModelSetSelector<J extends ModelJson, T extends Model<J>> {
     private bulkEditor: KnockoutObservable<string>;
     protected prettyResult: KnockoutReadonlyComputed<T[]>;
     private readonly isLoading: KnockoutObservable<boolean>;
+    protected nameAttr: string = "name";
+    protected getItemGroups: KnockoutReadonlyComputed<ModelSelectorItemGroup<J, T>[]>;
 
     constructor(params: ModelSetSelectorJson<J, T>) {
         // Create the complete list of users
@@ -80,8 +83,12 @@ export class ModelSetSelector<J extends ModelJson, T extends Model<J>> {
         this.isLoading = ko.observable(true);
         this.store.getAllAvailable().then((models: T[]) => {
             pushObservableArray(this.available, models);
+            // Set first set to be ALL models
             this.sets()[0].ids(models.map((u: T) => u.id));
+            // Load any custom user sets
             this.loadDefault(params.default);
+            // Load in any grouped sets from the DB
+            this.loadGroups();
             this.isLoading(false);
         });
 
@@ -183,7 +190,6 @@ export class ModelSetSelector<J extends ModelJson, T extends Model<J>> {
     }
 
     loadDefault(value: string) {
-        console.log(value);
         if (value === "first") {
             this.selectMode(SelectMode.SINGLE);
             this.singleOption(this.available()[0].id);
@@ -213,6 +219,16 @@ export class ModelSetSelector<J extends ModelJson, T extends Model<J>> {
                     break;
             }
         }
+    }
+
+    loadGroups() {
+        this.getItemGroups().forEach((group: ModelSelectorItemGroup<J, T>) => {
+            this.sets().push(new ModelSet({
+                name: group.name,
+                default: true,
+                ids: group.children.map((model: T) => model.id)
+            }));
+        });
     }
 
     deleteSet(): boolean {
@@ -278,9 +294,12 @@ export const MODEL_SET_SELECTOR_HTML = (setName: string) => `
         <!-- Single Person -->
         <div data-bind="if: selectMode()==='SINGLE'">
         <form class="form-inline">
-        <select data-bind="options: available, value: singleOption, optionsText: 'name', optionsValue: 'id'"
-                class="form-control custom-select ml-2 custom-select-sm"
-        ></select>
+        <select data-bind="foreach: getItemGroups(), value: singleOption, optionsText: 'title', optionsValue: 'id'"
+                class="form-control custom-select ml-2 custom-select-sm">
+            <optgroup data-bind="attr: {label: name}, foreach: children">
+                <option data-bind="text: $data.title(), option: $data.id"></option>
+            </optgroup>
+        </select>
         </form>
         </div>
         
@@ -310,7 +329,7 @@ export const MODEL_SET_SELECTOR_HTML = (setName: string) => `
             </label><br>
            <select multiple=multiple style="width: 100%"
                  data-bind="selectedOptions: selectedOptions, valueAllowUnset: true,
-                              options: available, optionsText: 'name', optionsValue: 'id', 
+                              options: available, optionsText: 'title', optionsValue: 'id', 
                               select2: { placeholder: '${setName}', allowClear: true }"></select>
 
             <!-- Incomplete
@@ -339,7 +358,7 @@ export const MODEL_SET_SELECTOR_HTML = (setName: string) => `
             <div data-bind="ifnot: isLoading">
                 Included ${setName}(s): 
                 <span data-bind="foreach: prettyResult">
-                    <span data-bind="text: name"></span>, 
+                    <span data-bind="text: title"></span>, 
                 </span>
                 <!-- ko if: currentSet().ids().length > showAllThreshold -->
                 <button type="button" class="btn btn-primary btn-sm" data-bind="click: () => showAll(!showAll())">
@@ -359,6 +378,21 @@ export class UserSetSelector extends ModelSetSelector<UserJson, User> {
 
     constructor(params: ModelSetSelectorJson<UserJson, User>) {
         super(params);
+
+        this.getItemGroups = ko.pureComputed(()=> {
+            let groups: Record<string, ModelSelectorItemGroup<UserJson, User>> = {};
+            this.available().forEach((u: User) => {
+                if (!(u.primaryRole() in groups)) {
+                    groups[u.primaryRole()] = new ModelSelectorItemGroup<UserJson, User>(u.primaryRole(), u.roles);
+                }
+                groups[u.primaryRole()].children.push(u);
+            });
+            return Object.values(groups);
+        }, this);
+
+        (<UserStore>this.store).sortMode.subscribe(() => {
+            this.available.sort(this.store.sortMethod.bind(this.store));
+        });
     }
 
     getDefaultGroupSetName(): string {
@@ -370,10 +404,43 @@ export class UserSetSelector extends ModelSetSelector<UserJson, User> {
     }
 }
 
+export class ModelSelectorItemGroup<J extends ModelJson, T extends Model<J>> {
+    name: string;
+    model: any;
+    children: T[];
+
+    constructor(name: string, model: any) {
+        this.name = name;
+        this.model = model;
+        this.children = [];
+    }
+}
+
 export class AssignmentSetSelector extends ModelSetSelector<AssignmentJson, Assignment> {
     constructor(params: ModelSetSelectorJson<AssignmentJson, Assignment>) {
         super(params);
+
+        this.getItemGroups = ko.pureComputed(()=> {
+            let groups: Record<number, ModelSelectorItemGroup<AssignmentJson, Assignment>> = {};
+            this.available().forEach((a: Assignment) => {
+                let id, name;
+                if (a.group() === null) {
+                    id = -2;
+                    name = "Ungrouped Assignments";
+                } else {
+                    id = a.group().id;
+                    name = a.group().name();
+                }
+                if (!(id in groups)) {
+                    groups[id] = new ModelSelectorItemGroup<AssignmentJson, Assignment>(name, a.group());
+                }
+                groups[id].children.push(a);
+            });
+            return Object.values(groups);
+        }, this);
     }
+
+    protected nameAttr: string = "title";
 
     getDefaultGroupSetName(): string {
         return "All assignments";
@@ -381,14 +448,6 @@ export class AssignmentSetSelector extends ModelSetSelector<AssignmentJson, Assi
 
     getNewGroupSetName(): string {
         return "New assignment set";
-    }
-
-    getItemGroups() {
-
-    }
-
-    getItemGroup(item: Assignment) {
-
     }
 }
 

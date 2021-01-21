@@ -50,8 +50,6 @@ export class Log extends Model<LogJson> {
         this.koFromJson(data);
     }
 
-
-
     getAsSubmissionKey() {
         return [this.courseId(), this.subjectId(), this.assignmentId()].join(",");
     }
@@ -59,8 +57,13 @@ export class Log extends Model<LogJson> {
     isEditEvent() {
         return (this.eventType() === "File.Edit" || this.eventType() === "File.Create");
     }
+
+    when() {
+        return this.clientTimestamp() || this.dateCreated();
+    }
 }
 
+// TODO: Finish processing all event types
 export const REMAP_EVENT_TYPES: Record<string, string> = {
     "Session.Start": "Began session",
     "X-IP.Change": "Changed IP address",

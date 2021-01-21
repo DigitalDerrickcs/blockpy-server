@@ -2,6 +2,7 @@ import * as ko from 'knockout';
 import {Model, ModelJson, ModelStore} from "./model";
 import {capitalize, TwoWayReadonlyMap} from "../components/plugins";
 import {ajax_get} from "../components/ajax";
+import {Server} from "../components/server";
 
 export interface RoleJson extends ModelJson {
     id: number;
@@ -37,6 +38,12 @@ export interface UserJson extends ModelJson {
     roles?: RoleJson[];
 }
 
+export function cleanRole(role: string) {
+    let components = role.split("/");
+    role = components[components.length-1];
+    return capitalize(role);
+}
+
 export class User extends Model<UserJson> {
     id: number;
     email: KnockoutObservable<string>;
@@ -48,9 +55,12 @@ export class User extends Model<UserJson> {
         "first_name": "firstName",
         "last_name": "lastName"
     });
-    name: KnockoutReadonlyComputed<string>;
 
+    // Computed fields
+    name: KnockoutReadonlyComputed<string>;
     primaryRole: KnockoutReadonlyComputed<string>;
+    title: KnockoutReadonlyComputed<string>;
+    displayMode: KnockoutObservable<UserDisplayMode>;
 
     constructor(data: UserJson) {
         super(data);
@@ -62,10 +72,23 @@ export class User extends Model<UserJson> {
             if (!this.roles().length) {
                 return "User";
             } else {
-                return this.roles().map((role: Role) =>
-                    capitalize(role.name()
-                        .replace("urn:lti:role:ims/lis/", ""))
-                    ).join("/");
+                return this.roles().map((role: Role) => cleanRole(role.name())).join("/");
+            }
+        }, this);
+        this.title = ko.pureComputed(() => {
+            if (!this.displayMode) {
+                return this.name();
+            }
+            switch (this.displayMode()) {
+                case UserDisplayMode.LAST_FIRST:
+                    return this.lastName() + ", " + this.firstName();
+                case UserDisplayMode.EMAIL:
+                    return this.email();
+                case UserDisplayMode.BLOCKPY_ID:
+                    return ""+this.id;
+                default:
+                case UserDisplayMode.FIRST_LAST:
+                    return this.name();
             }
         }, this);
     }
@@ -94,8 +117,59 @@ export class User extends Model<UserJson> {
     }
 }
 
+export enum UserDisplayMode {
+    FIRST_LAST="First name last name",
+    LAST_FIRST="Last name, first name",
+    EMAIL="Email",
+    BLOCKPY_ID="Internal BlockPy ID",
+    //DATE_CREATED="Date created"
+}
+
 export class UserStore extends ModelStore<UserJson, User> {
     GET_FIELD: string = "users";
+    private readonly displayOptions: UserDisplayMode[];
+    sortMode: KnockoutObservable<UserDisplayMode>;
+    private displayMode: KnockoutObservable<UserDisplayMode>;
+
+    constructor(server: Server, courseId: number|null, initialIds: number[], initialData: UserJson[]) {
+        super(server, courseId, initialIds, initialData);
+        this.sortMode = ko.observable(<UserDisplayMode>localStorage.getItem(`BLOCKPY_COURSE_USER_SORT_MODE`) || UserDisplayMode.FIRST_LAST);
+        this.displayMode = ko.observable(<UserDisplayMode>localStorage.getItem(`BLOCKPY_COURSE_USER_DISPLAY_MODE`) || UserDisplayMode.FIRST_LAST);
+
+        this.sortMode.subscribe(() => {
+            localStorage.setItem(`BLOCKPY_COURSE_USER_SORT_MODE`, this.sortMode());
+            // Notify the user set selector?
+        });
+        this.displayMode.subscribe(() => {
+            localStorage.setItem(`BLOCKPY_COURSE_USER_DISPLAY_MODE`, this.displayMode());
+        });
+        this.displayOptions = Object.values(UserDisplayMode);
+    }
+
+    sortMethod(left: User, right: User): number {
+        switch (this.sortMode()) {
+            case UserDisplayMode.FIRST_LAST:
+                return (left.firstName() === right.firstName()) ?
+                    left.lastName().localeCompare(right.lastName()) :
+                    left.firstName().localeCompare(right.firstName());
+            case UserDisplayMode.LAST_FIRST:
+                return (left.lastName() === right.lastName()) ?
+                    left.firstName().localeCompare(right.firstName()) :
+                    left.lastName().localeCompare(right.lastName());
+            case UserDisplayMode.BLOCKPY_ID:
+                return (left.id - right.id);
+            default:
+            case UserDisplayMode.EMAIL:
+                return (left.email().localeCompare(right.email()));
+            /*case UserDisplayMode.DATE_CREATED:
+                return left.dateCreated() === null ? 1 : right.dateCreated() === null ? -1 :
+                    (left.dateCreated().localeCompare(right.dateCreated()));*/
+        }
+    }
+
+    cleanData(models: User[]): User[] {
+        return models.sort(this.sortMethod.bind(this));
+    }
 
     getPayload(): any {
         return {
@@ -113,7 +187,7 @@ export class UserStore extends ModelStore<UserJson, User> {
     }
 
     makeEmptyInstance(id: number): User {
-        return new User({
+        let u = new User({
             id: id,
             email: "",
             date_created: null,
@@ -121,15 +195,49 @@ export class UserStore extends ModelStore<UserJson, User> {
             first_name: "",
             last_name: "Unknown"
         });
+        u.displayMode = this.displayMode;
+        return u;
     }
 }
 
 export const UserTemplate = `
-    <div>User: <span data-bind="text: name"></span></div>
+    <div>User: <span data-bind="text: title"></span></div>
 `;
 
 export const UserShortTemplate = `
-    <div><span data-bind="text: primaryRole"></span>: <span data-bind="text: name"></span> (<span data-bind="text: email"></span>)</div>
+    <div><span data-bind="text: primaryRole"></span>: <span data-bind="text: title"></span></div>
+`;
+
+export const UserDisplaySettingsEditor = `
+<div>
+    <button class="btn btn-outline-secondary btn-sm float-right" type="button"
+            data-toggle="collapse" data-target="#user-display-settings"
+            aria-expanded="false" aria-controls="collapseExample">
+        User Settings <span class="fas fa-expand-arrows-alt"></span>
+    </button>
+    <div id="user-display-settings" class="collapse">
+    <form>
+        <div class="card card-body">
+        <div class="form-group row">
+            <label class="col-sm-4 col-form-label" for="display-mode-select">
+                Render user names as: 
+            </label>
+            <div class="col-sm-8">
+                <select id="display-mode-select" class="custom-select" data-bind="options: options, value: displayMode"></select>
+            </div>
+        </div>
+        <div class="form-group row">
+            <label class="col-sm-4 col-form-label" for="sort-mode-select">
+                Sort user names as: 
+            </label>
+            <div class="col-md-8">
+                <select id="sort-mode-select" class="custom-select" data-bind="options: options, value: sortMode"></select>
+            </div>
+        </div>
+        </div>
+    </div>
+    </form>
+</div>
 `;
 
 ko.components.register("user", {
@@ -139,4 +247,8 @@ ko.components.register("user", {
 
 ko.components.register("user-short", {
     template: UserShortTemplate
+})
+
+ko.components.register("user-display-settings-editor", {
+    template: UserDisplaySettingsEditor
 })

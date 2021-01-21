@@ -168,14 +168,15 @@ def get_assignments():
     course_id = get_course_id()
     user, user_id = get_user()
     # TODO: verify that they have the permissions to see these assignments
-    assignments = []
+    assignments, groups = [], []
     errors = []
     if not assignment_ids:
         course: Course = Course.by_id(course_id)
         check_resource_exists(course, "Course", course_id)
-        assignments = natsorted(course.get_submitted_assignments(),
-                                key=lambda r: r.name)
-        assignments = [a.encode_json() for a in assignments]
+        grouped_assignments = natsorted(course.get_submitted_assignments_grouped(),
+                                        key=lambda r: (r.AssignmentGroup.name if r.AssignmentGroup is not None else None, r.Assignment.name))
+        assignments = [a.Assignment.encode_json() for a in grouped_assignments]
+        groups = [a.AssignmentGroup.encode_json() if a.AssignmentGroup is not None else None for a in grouped_assignments]
     else:
         for assignment_id in assignment_ids.split(","):
             if not assignment_id.isdigit():
@@ -185,7 +186,7 @@ def get_assignments():
             assignment = Assignment.by_id(assignment_id)
             check_resource_exists(assignment, "Assignment", assignment_id)
             assignments.append(assignment.encode_json())
-    return ajax_success(dict(assignments=assignments, errors=errors))
+    return ajax_success(dict(assignments=assignments, errors=errors, groups=groups))
 
 
 @blueprint_assignments.route('/export/', methods=['GET', 'POST'])
@@ -202,7 +203,7 @@ def export():
     bundle = export_bundle(assignments=[assignment])
     filename = assignment.get_filename()
     return Response(json.dumps(bundle), mimetype='application/json',
-                    headers={'Content-Disposition':'attachment;filename={}'.format(filename)})
+                    headers={'Content-Disposition': 'attachment;filename={}'.format(filename)})
 
 
 @blueprint_assignments.route('/bulk_upload/', methods=['GET', 'POST'])
@@ -238,6 +239,7 @@ def bulk_upload():
          <input type=submit value=Upload>
     </form>
     '''
+
 
 @blueprint_assignments.route('/images/<path:path>', methods=['GET', 'POST'])
 def assignments_static_images(path):

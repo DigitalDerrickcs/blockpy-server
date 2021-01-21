@@ -39,12 +39,12 @@ export class Server {
 
     constructor(courseId: number, initialIds?: ServerIds, initialData?: ServerData) {
         this.courseId = courseId;
-        this.userStore = new UserStore(courseId, initialIds.userIds, initialData.users);
-        this.courseStore = new CourseStore(courseId, initialIds.courseIds, initialData.courses);
-        this.assignmentStore = new AssignmentStore(courseId, initialIds.assignmentIds, initialData.assignments);
-        this.assignmentGroupStore = new AssignmentGroupStore(courseId, initialIds.assignmentGroupIds, initialData.assignmentGroups);
-        this.reviewStore = new ReviewStore(courseId, initialIds.reviewIds, initialData.reviews);
-        this.submissionStore = new SubmissionStore(courseId, initialIds.submissionIds, initialData.submissions);
+        this.userStore = new UserStore(this, courseId, initialIds.userIds, initialData.users);
+        this.courseStore = new CourseStore(this, courseId, initialIds.courseIds, initialData.courses);
+        this.assignmentStore = new AssignmentStore(this, courseId, initialIds.assignmentIds, initialData.assignments);
+        this.assignmentGroupStore = new AssignmentGroupStore(this, courseId, initialIds.assignmentGroupIds, initialData.assignmentGroups);
+        this.reviewStore = new ReviewStore(this, courseId, initialIds.reviewIds, initialData.reviews);
+        this.submissionStore = new SubmissionStore(this, courseId, initialIds.submissionIds, initialData.submissions);
     }
 
 }
