@@ -1,0 +1,100 @@
+{% import 'helpers/report_tools.html' as report_tools %}
+
+{% set hiding = assignment.hidden or assignment.get_setting('hide_submission', False) %}
+
+<div xml:lang="en">
+    <h2 id='{{ assignment.slug() }}'>Reading {{ assignment.name }}</h2>
+{% if is_grader or not hiding %}
+    {% if hiding and is_grader %}<small>Hidden assignment! Instructions, submitted code, grade, and other details will be hidden from students</small>{% endif %}
+    <div class="module mb-2 m-2">
+     <a class="read-more collapsed" data-toggle="collapse" href="#collapse-instructions-{{ assignment.slug() }}" role="button"></a>
+      <div class="collapse" id="collapse-instructions-{{ assignment.slug() }}" aria-expanded="false">
+        {{ assignment.instructions|markdown|safe }}
+      </div>
+    </div>
+{% endif %}
+
+{%  include "reports/reviewing_interface.html" with context %}
+
+{{ report_tools.render_submission_details(submission, is_grader, hiding) }}
+
+{% if is_grader or not hiding %}
+    <div>Full Submission: <a href="{{ url_for('blockpy.load_assignment',
+                            assignment_id=submission.assignment_id,
+                            user_id=submission.user_id,
+                            course_id=submission.course_id,
+                            force_download=True,
+                            embed=True) }}">download</a></div>
+    <div>History: <a href="{{ url_for('blockpy.browse_history', assignment_id=submission.assignment_id,
+        user_id=submission.user_id, course_id=submission.course_id) }}">view</a></div>
+{% if submission.code %}
+    {%  set sub = submission.code|json_load %}
+    {%  set filename = sub.filename or "" %}
+    {%  set code = sub.code or "# No code uploaded" %}
+    {%  set sections = sub.sections or [] %}
+    {%  set explanations = sub.explanations or [] %}
+    {%  set eventCounts = sub.eventCounts or {} %}
+    {%  set general = sub.general or "" %}
+    <div id="reviewable-code-area-{{ submission.id }}">
+
+
+        <span>General Explanation: </span>
+        {% if general %}
+            <pre class="module mb-2 m-2">{{ general }}</pre>
+        {% else %}
+            No general explanation was recorded.<br>
+        {% endif %}
+
+        <span>Explanations: </span>
+        <div class="mb-2 m-2">
+            {% if sections %}
+                {% for section in sections %}
+                    <h4><code>{{ section.name }}</code></h4>
+                    <div class="row">
+                        <div class="col-md-6">
+                            {{ section.code|highlight_python_code|safe }}
+                        </div>
+                        <div class="col-md-6">
+                            <pre class="module mb-2 m-2">
+                                {{- explanations|selectattr('name', '==', section.name)|map(attribute='contents')|first|default('No explanation was recorded.') -}}
+                            </pre>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                No sections were recorded.
+            {% endif %}
+        </div>
+
+
+        {% if eventCounts %}
+            <span>Event Counts: </span><ul>
+            {% for event, count in eventCounts.items() %}
+                <li><code>{{ event }}</code>: {{ count }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            No event counts were recorded.
+        {% endif %}
+
+        {% if submission.extra_files %}
+            {% for filename, contents in (submission.extra_files|json_load).items() %}
+                <strong>{{ filename }}</strong>
+                {{ contents|highlight_json|safe }}
+            {% endfor %}
+        {% endif %}
+
+        Full submitted code: <code>{{ filename }}</code><br>
+        {% if code %}
+            <div class="module mb-2 m-2">
+             <a class="read-more collapsed" data-toggle="collapse" href="#collapse-code-{{ assignment.slug() }}" role="button"></a>
+              <div class="collapse" id="collapse-code-{{ assignment.slug() }}" aria-expanded="false">
+                {{ code|highlight_python_code|safe }}
+              </div>
+            </div>
+        {% endif %}
+    </div>
+
+    {% endif %}
+{% endif %}
+</div>

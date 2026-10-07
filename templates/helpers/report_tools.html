@@ -1,0 +1,59 @@
+{% macro render_metrics(submission, is_grader, hide=False) %}
+
+<details style="margin-top:1em; margin-bottom:1em;">
+    <summary><strong>Metrics</strong></summary>
+    <table class="table table-sm table-bordered table-condensed table-striped table-hover">
+    <thead>
+        <tr>
+            <th>Metric</th>
+            <th>Value</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for counter in submission.counts %}
+        <tr>
+            <td>{{ counter.metric }}</td>
+            <td>{{ counter.value }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    </table>
+    </details>
+{% endmacro %}
+
+{% macro render_submission_details(submission, is_grader, hide=False) %}
+
+{% set DATE_ATTRS = ["date_created", "date_started", "date_modified", "date_submitted", "date_graded", "date_due", "date_locked"] %}
+
+<table class="table table-sm table-bordered table-condensed table-striped table-hover">
+<thead>
+    <tr>
+        <th>Submission</th>
+        <th>Grading</th>
+        <th>Score Status</th>
+        {% if not hide or is_grader %}<th>Final Score</th>{% endif %}
+        {% for date_attr in DATE_ATTRS %}
+            {% if submission[date_attr] %}
+                <th>{{ date_attr.replace("date_", "").capitalize() }}</th>
+            {% endif %}
+        {% endfor %}
+</tr>
+</thead>
+<tbody>
+<tr>
+    <td id="summary-submission-status-{{ submission.id }}">{{ submission.human_submission_status() }}</td>
+    <td id="summary-grading-status-{{ submission.id }}">{{ submission.human_grading_status() }}</td>
+    <td id="summary-score-status-{{ submission.id }}">{{ submission.full_status(not is_grader) }}</td>
+    {% set final_score, final_reasons = submission.penalized_full_score() %}
+    {% if not hide or is_grader %}
+    <td title={{ ("The actual score given to this submission, incorporating any late penalties and human reviews. " + final_reasons|join('\n<br>\n'))|tojson }}>{{ final_score }}</td>
+    {% endif %}
+    {% for date_attr in DATE_ATTRS %}
+        {% if submission[date_attr] %}
+        <td title="{{ submission[date_attr] }}"><local-time utc="{{ submission[date_attr] }}Z"></local-time></td>
+        {% endif %}
+    {% endfor %}
+</tr>
+</tbody>
+</table>
+{% endmacro %}

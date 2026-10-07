@@ -1,0 +1,96 @@
+services:
+  web:
+    build: ./
+    container_name: blockpy
+    env_file:
+      - ./.env
+    environment:
+      - BASE_DIR=/usr/src/app
+    volumes:
+      - ./:/usr/src/app
+      - static_volume:/usr/src/app/static
+      - certs_volume:/usr/src/app/certs
+      - logs_volume:/usr/src/app/logs
+      - backups_volume:/usr/src/app/backups
+      - instance_volume:/usr/src/app/instance
+      - ./instance/configuration.py:/usr/src/app/instance/configuration.py
+      - ./uwsgi.ini.template:/etc/uwsgi/uwsgi.ini.template  # Mount the template
+      - uwsgi_socket:/run/uwsgi  # Mount the socket directory
+    expose:
+      - 8888
+    depends_on:
+      - "db"
+      - "redis"
+    user: www-data
+    restart: always
+    entrypoint: /usr/local/bin/docker-entrypoint.sh
+  db:
+    image: postgres:16-bullseye
+    restart: always
+    container_name: blockpy_db
+    env_file:
+      - ./.env.db
+    environment:
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - blockpy_db:/var/lib/postgresql/data/
+      - ./backups/:/backups
+      - ./conf/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+  redis:
+    image: redis:7.4-alpine
+    restart: always
+    container_name: blockpy_redis
+    env_file:
+      - ./.env
+    ports:
+      - "6379:6379"
+    command: sh -c 'redis-server --requirepass "$$REDIS_PASSWORD"'
+  huey:
+    build: ./
+    entrypoint: []
+    container_name: blockpy_huey
+    command: python3 manage.py huey
+    user: www-data
+    working_dir: /usr/src/app
+    volumes:
+      - ./:/usr/src/app
+      - logs_volume:/usr/src/app/logs
+      - instance_volume:/usr/src/app/instance
+      - static_volume:/usr/src/app/static
+      - certs_volume:/usr/src/app/certs
+      - ./instance/configuration.py:/usr/src/app/instance/configuration.py
+    depends_on:
+      - "redis"
+      - "web"
+    env_file:
+      - ./.env
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: blockpy_nginx
+    env_file:
+      - ./.env
+    volumes:
+      - ./conf/nginx/nginx.template.conf:/etc/nginx/nginx.template.conf
+      - ./certs:/etc/nginx/certs
+      - ./static/public:/var/www/public
+      - logs_volume:/var/log/nginx
+      - uwsgi_socket:/run/uwsgi
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - web
+    command: >
+      /bin/sh -c "envsubst < /etc/nginx/nginx.template.conf > /etc/nginx/nginx.conf && 
+                  nginx -t && 
+                  exec nginx -g 'daemon off;'"
+    restart: always
+# Names our volume
+volumes:
+  blockpy_db:
+  static_volume:
+  certs_volume:
+  logs_volume:
+  backups_volume:
+  instance_volume:
+  uwsgi_socket:

@@ -1,0 +1,113 @@
+{% macro render_quiz_question(question, feedback, student, check, is_grader, question_id) %}
+    {% if is_grader %}
+        <h5>{{ question_id }} ({{ question.type }})</h5>
+    {% endif %}
+    <div>{{ question|make_readonly_quiz_body(feedback, student, check, is_grader)|safe  }}</div>
+    {% if question.type == "true_false_question" %}
+        <div>You chose <span class="mdq mdq-{{ question|check_quiz_answer(feedback, student, check, is_grader) }}">{{ student }}</span>.</div>
+    {% elif question.type == "multiple_choice_question" %}
+        <ul>
+        {% for answer in question.answers %}
+            <li>
+            {% if student == answer %}
+                <span class="mdq mdq-{{ question|check_quiz_answer(feedback, student, check, is_grader) }}">
+                {{ student|safe }}
+                </span>
+            {% else %}
+                {{ answer|safe }}
+            {% endif %}</li>
+        {% endfor %}
+        </ul>
+        {% if student not in question.answers %}
+            <div>You chose <span class="mdq mdq-{{ question|check_quiz_answer(feedback, student, check, is_grader) }}"><i>Nothing</i></span></div>
+        {% endif %}
+        {% if is_grader and not question|check_quiz_answer(feedback, student, check, is_grader) %}
+            <div>The correct answer was:<div>{{ check.get('correct') }}</div></div>
+        {% endif %}
+    {% elif question.type == "multiple_answers_question" %}
+        Chosen: <ul class="maq">
+        {% for potentialAnswer in question.answers %}
+            {% if potentialAnswer in student %}
+                <li class="maq maq-{{ question|check_quiz_answer(feedback, student, check, is_grader, potentialAnswer) }}">
+                    {{ potentialAnswer|safe }}</li>
+            {% endif %}
+        {% endfor %}
+        </ul>
+        Not chosen: <ul class="maq">
+        {% for potentialAnswer in question.answers %}
+            {% if potentialAnswer not in student %}
+                <li class="maq maq-{{ question|check_quiz_answer(feedback, student, check, is_grader, potentialAnswer) }}">
+                    {{ potentialAnswer|safe }}</li>
+            {% endif %}
+        {% endfor %}
+        </ul>
+    {% elif question.type == "matching_question" %}
+        <table class="table table-bordered table-striped table-condensed" style="width: auto;">
+        <thead>
+            <th>Prompt</th><th>Chosen</th>
+            {% if is_grader %}
+                <th>Correct</th>
+            {% endif %}
+        </thead>
+        {% for s, a in question.statements|zip(student) %}
+            <tr>
+                <td>{{ s|safe }}</td>
+                <td><span class="mdq mdq-{{ question|check_quiz_answer(feedback, a, check, is_grader, loop.index0) }}">
+                    {% if a %}
+                        {{ a|safe }}
+                    {% else %}
+                        <i>Nothing</i>
+                    {% endif %}
+                </span></td>
+                {% if is_grader %}
+                    <td>{{ check.get('correct')[loop.index0]|safe }}</td>
+                {% endif %}
+            </tr>
+        {% endfor %}
+        </table>
+    {% elif question.type in ("short_answer_question", "numerical_question") %}
+        <div>You entered <span class="mdq mdq-{{ question|check_quiz_answer(feedback, student, check, is_grader) }}">
+            {% if student %}
+                <code>{{ student }}</code>
+            {% else %}
+                <i>Nothing</i>
+            {% endif %}
+            </span>
+            {% if student.lstrip() != student and student.rstrip() != student %}
+                <i>(there are whitespace characters on both sides of your answer)</i>
+            {% elif student.rstrip() != student %}
+                <i>(there are whitespace characters at the end of your answer)</i>
+            {% elif student.lstrip() != student %}
+                <i>(there are whitespace characters at the start of your answer)</i>
+            {% endif %}
+        {%  if is_grader and not question|check_quiz_answer(feedback, student, check, is_grader) %}
+            {% if 'correct_exact' in check %}
+                <div>I expected one of the following exact answers instead:
+                <ul>
+                    {% for correct in check.get('correct_exact') %}
+                        <li><code>{{ correct }}</code></li>
+                    {% endfor %}
+                </ul>
+                </div>
+            {% endif %}
+            {% if 'correct_regex' in check %}
+                <div>I expected one of the following exact regular expressions to match instead:
+                <ul>
+                    {% for correct in check.get('correct_regex') %}
+                        <li><code>{{ correct }}</code></li>
+                    {% endfor %}
+                </ul>
+                </div>
+            {% endif %}
+        {% endif %}
+        </div>
+    {% elif question.type == "essay_question" %}
+        <div>You entered <pre>{{ student }}</pre></div>
+    {% else %}
+        {% if is_grader %}
+            <!--<pre>{{ question|pprint }}</pre>
+            <pre>{{ student|pprint }}</pre>-->
+            <pre>{{ check|pprint }}</pre>
+        {% endif %}
+    {% endif %}
+{% endmacro %}

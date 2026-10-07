@@ -1,0 +1,56 @@
+{% from "helpers/_formhelpers.html" import render_field %}
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Courses: Edit {{ course.name }}
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+<script type='text/javascript'>
+</script>
+{% endblock %}
+
+{% block body %}
+
+<h1>Edit Course: {{ course.name }}</h1>
+
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert-warning">
+            {% for message in messages %}
+                {{ message }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+    This form is for editing an existing course's settings. You should only mess with your course if you know what you are doing.</a>
+    </p>
+
+<form method=post action="{{ url_for('courses.edit', course_id=course_id) }}">
+    {{ render_field(edit_form.name) }}
+    {{ render_field(edit_form.visibility) }}
+    {{ render_field(edit_form.term) }}
+    {{ render_field(edit_form.url) }}
+    {{ render_field(edit_form.id) }}
+    {{ render_field(edit_form.settings) }}
+    <p style="padding-left: 2em;">
+        Some settings need to be set through this JSON object.
+        This includes the <code>late_policy</code>, which can be set as follows:
+        <code>"late_policy": {"interval": "hours", "amount": "1%"}</code>
+        The <code>pinned</code> and <code>textbooks</code> fields should normally be set through their appropriate menus, rather than directly editing here.
+        Here is an example of what this might look like in practice:
+    </p>
+    <pre style="padding-left: 2em;">{"textbooks": ["bakery_textbook"], "pinned": true,"late_policy": {"interval": "hours", "amount": "1%"}}</pre>
+    <hr>
+    <p><input type="submit" value="Edit Course" class="btn btn-success"></p>
+</form>
+
+{% endblock %}

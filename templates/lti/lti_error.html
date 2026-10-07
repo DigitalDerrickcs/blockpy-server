@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BlockPy LTI Error</title>
+</head>
+<body>
+
+<h1>BlockPy Server Error</h1>
+
+{% with messages = get_flashed_messages() %}
+    {% if messages %}
+        <div class="alert alert-warning">
+        {% for message in messages %}
+            {{ message|safe }}<br>
+        {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<div class="alert alert-danger" style="padding: 4px">
+{% if message %}
+    {{ message|safe }}<br>
+{% endif %}
+</div>
+
+
+<p>
+    Sounds like the corgis powering our server seem to have encountered a problem.
+    If the problem persists, please contact us at
+    <a href="mailto:{{ config['SYS_ADMINS'][0] }}">{{ config['SYS_ADMINS'][0] }}</a>.
+</p>
+
+</body>
+</html>

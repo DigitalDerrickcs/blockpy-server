@@ -18,7 +18,8 @@ Courses: Add Users
 <form method=post action="{{ url_for('courses.add_users', course_id=course_id) }}">
   <dl>
     <p>Add each new user email on a new line. Optionally, you can include their names ("First Name|Last Name|email@email.com").</p>
-    {{ render_field(add_form.new_users) }}
+    {{ render_field(add_form.new_users) }}<br>
+      {{ render_field(add_form.role) }}<br>
   </dl>
   <p><input type=submit value="Add Student">
 </form>

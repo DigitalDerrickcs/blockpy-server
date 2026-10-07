@@ -1,0 +1,226 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Edit Assignment Settings
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+
+</script>
+
+
+<script type="text/javascript">
+    const GROUP_ASSIGNMENTS = {{ group_assignment_map|tojson }};
+    function updateGroupState(attribute, groupId, assignmentIds) {
+        const checkbox = document.getElementById("group-"+attribute+"-"+groupId);
+        const checkStatus = assignmentIds.map(assignmentId => document.getElementById(`assignment-${attribute}-${assignmentId}`).checked);
+        const every = checkStatus.every(Boolean);
+        const some = checkStatus.some(Boolean);
+        checkbox.checked = every;
+        checkbox.indeterminate = !every && every !== some;
+        return checkbox;
+    }
+    function attachEvents(attribute, groupId, assignmentIds) {
+        assignmentIds.forEach((assignmentId => {
+            document.getElementById(`assignment-${attribute}-${assignmentId}`).onchange = (e) => {
+                if (groupId != null) updateGroupState(attribute, groupId, assignmentIds);
+                $(`#assignment-restore-${assignmentId}`).show();
+            };
+        }));
+        if (groupId != null) {
+            const groupCheckbox = updateGroupState(attribute, groupId, assignmentIds);
+            groupCheckbox.onchange = (e) => {
+                assignmentIds.forEach((assignmentId => {
+                    document.getElementById(`assignment-${attribute}-${assignmentId}`).checked = e.target.checked;
+                }));
+            };
+        }
+    }
+    function attachInputEvents(attribute, groupId, assignmentIds) {
+        // When group name or URL changes...
+        if (groupId != null) {
+            $(`#group-${attribute}-${groupId}`).change((e) => {
+                $(`#group-restore-${groupId}`).show();
+            });
+        }
+        // When assignment name or URL changes...
+        assignmentIds.forEach((assignmentId => {
+            $(`#assignment-${attribute}-${assignmentId}`).change((e) => {
+                $(`#assignment-restore-${assignmentId}`).show();
+            });
+        }));
+    }
+    const CHECKBOXES = ['public', 'hidden', 'reviewed', 'subordinate'];
+    const INPUT_BOXES = ['name', 'url'];
+    $(document).ready(() => {
+        GROUP_ASSIGNMENTS.forEach(([group, assignments]) => {
+            attachInputEvents('name', group, assignments);
+            attachInputEvents('url', group, assignments);
+            attachEvents('public', group, assignments);
+            attachEvents('hidden', group, assignments);
+            attachEvents('reviewed', group, assignments);
+            attachEvents('subordinate', group, assignments);
+            // Restore row functionality
+            assignments.forEach((assignmentId) => {
+                $(`#assignment-restore-${assignmentId}`).click((e) => {
+                    CHECKBOXES.forEach((attribute) => {
+                        const data = $(e.target).attr(`data-restore-${attribute}`);
+                        $(`#assignment-${attribute}-${assignmentId}`).prop({checked: data === "True"});
+                        if (group != null) updateGroupState(attribute, group, assignments);
+                    });
+                    INPUT_BOXES.forEach((attribute) => {
+                        const data = $(e.target).attr(`data-restore-${attribute}`);
+                        $(`#assignment-${attribute}-${assignmentId}`).val(data);
+                    });
+                    $(e.target).hide();
+                    return false;
+                });
+            });
+            if (group != null) {
+                $(`#group-restore-${group.id}`).click((e) => {
+                    INPUT_BOXES.forEach((attribute) => {
+                        const data = $(e.target).attr(`data-restore-${attribute}`);
+                        $(`#group-${attribute}-${group.id}`).val(data);
+                    });
+                    $(e.target).hide();
+                    return false;
+                });
+            }
+        });
+    });
+</script>
+
+{% endblock %}
+
+{% block body %}
+
+    <h1>Edit Settings</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert-warning">
+            {% for message in messages %}
+                {{ message }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This page allows you to edit the settings for each assignment.
+        You should only edit this page if you know what you are doing!
+    </p>
+
+    <form action="" method=post>
+
+    <input type="submit" value="Save updates" class="btn btn-success">
+
+    <h3>Ungrouped Assignments</h3>
+    {% for group, assignments in groups.items() %}
+        {% if group %}
+            <!-- Assignment Groups -->
+            <h3>{{ group.name }}</h3>
+            <div class="form-group row bg-light">
+                <label class="col-md-1 col-form-label">{{ group.id }}</label>
+                <div class="col-sm-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="group-restore-{{ group.id }}"
+                        data-restore-name="{{ group.name }}"
+                        data-restore-url="{{ group.url }}"
+                        style="display:none;">Restore</button>
+                </div>
+                <div class="col-sm-2">
+                    <input name="group-name-{{ group.id }}" id="group-name-{{ group.id }}" class="form-control"
+                       value="{{ group.name }}">
+                </div>
+                <div class="col-sm-3">
+                    <input name="group-url-{{ group.id }}" id="group-url-{{ group.id }}" class="form-control text-monospace"
+                       value="{{ group.url }}">
+                </div>
+                <div class="form-check form-check-inline col-sm-1">
+                    <input name="group-public-{{ group.id }}" id="group-public-{{ group.id }}"
+                           class="form-check-input" type="checkbox">
+                    <label class="form-check-label" for="group-public-{{ group.id }}">Public</label>
+                </div>
+                <div class="form-check form-check-inline col-sm-1">
+                    <input name="group-hidden-{{ group.id }}" id="group-hidden-{{ group.id }}"
+                           class="form-check-input" type="checkbox">
+                    <label class="form-check-label" for="group-hidden-{{ group.id }}">Hide</label>
+                </div>
+                <div class="form-check form-check-inline col-sm-1">
+                    <input name="group-reviewed-{{ group.id }}" id="group-reviewed-{{ group.id }}"
+                           class="form-check-input" type="checkbox">
+                    <label class="form-check-label" for="group-reviewed-{{ group.id }}">Review</label>
+                </div>
+                <div class="form-check form-check-inline col-sm-1">
+                    <input name="group-subordinate-{{ group.id }}" id="group-subordinate-{{ group.id }}"
+                           class="form-check-input" type="checkbox">
+                    <label class="form-check-label" for="group-subordinate-{{ group.id }}">Subordinate</label>
+                </div>
+            </div>
+        {% endif %}
+
+        <!-- Assignments -->
+        {% for assignment in assignments %}
+        <div class="form-group row">
+            <div class="col-md-1">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="assignment-restore-{{ assignment.id }}"
+                    data-restore-name="{{ assignment.name }}"
+                    data-restore-url="{{ assignment.url }}"
+                    data-restore-hidden="{{ assignment.hidden }}"
+                    data-restore-public="{{ assignment.public }}"
+                    data-restore-reviewed="{{ assignment.reviewed }}"
+                    data-restore-subordinate="{{ assignment.subordinate }}"
+                    style="display:none;">Restore</button>
+            </div>
+            <label class="col-md-1 col-form-label">
+                {{ assignment.id }}
+                {{ navigation.assignment_type_icon(assignment.type) }}
+            </label>
+            <div class="col-sm-2">
+                <input name="assignment-name-{{ assignment.id }}" id="assignment-name-{{ assignment.id }}" class="form-control"
+                   value="{{ assignment.name }}">
+            </div>
+            <div class="col-sm-3">
+                <input name="assignment-url-{{ assignment.id }}" id="assignment-url-{{ assignment.id }}" class="form-control text-monospace"
+                   value="{{ assignment.url }}">
+            </div>
+            <div class="form-check form-check-inline col-sm-1">
+                <input name="assignment-public-{{ assignment.id }}" id="assignment-public-{{ assignment.id }}"
+                       class="form-check-input" type="checkbox" {{ assignment.public and "checked" }} value="true">
+                <input name="assignment-public-{{ assignment.id }}" type="hidden" value="false">
+                <label class="form-check-label" for="assignment-public-{{ assignment.id }}">Public</label>
+            </div>
+            <div class="form-check form-check-inline col-sm-1">
+                <input name="assignment-hidden-{{ assignment.id }}" id="assignment-hidden-{{ assignment.id }}"
+                       class="form-check-input" type="checkbox" {{ assignment.hidden and "checked" }} value="true">
+                <input name="assignment-hidden-{{ assignment.id }}" type="hidden" value="false">
+                <label class="form-check-label" for="assignment-hidden-{{ assignment.id }}">Hide</label>
+            </div>
+            <div class="form-check form-check-inline col-sm-1">
+                <input name="assignment-reviewed-{{ assignment.id }}" id="assignment-reviewed-{{ assignment.id }}"
+                       class="form-check-input" type="checkbox" {{ assignment.reviewed and "checked" }} value="true">
+                <input name="assignment-reviewed-{{ assignment.id }}" type="hidden" value="false">
+                <label class="form-check-label" for="assignment-reviewed-{{ assignment.id }}">Review</label>
+            </div>
+            <div class="form-check form-check-inline col-sm-1">
+                <input name="assignment-subordinate-{{ assignment.id }}" id="assignment-subordinate-{{ assignment.id }}"
+                       class="form-check-input" type="checkbox" {{ assignment.subordinate and "checked" }} value="true">
+                <input name="assignment-subordinate-{{ assignment.id }}" type="hidden" value="false">
+                <label class="form-check-label" for="assignment-subordinate-{{ assignment.id }}">Subordinate</label>
+            </div>
+        </div>
+        {% endfor %}
+    {% endfor %}
+        <input type="submit" value="Save updates" class="btn btn-success">
+    </form>
+
+
+{% endblock %}

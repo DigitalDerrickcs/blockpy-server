@@ -1,0 +1,132 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Run Code Search
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+    $(document).ready(() => {
+        $("#generate-report").click(() => {
+            const assignmentId = $("#choose-assignment").val();
+            const otherStudentThreshold = $("#other_student_threshold").val();
+            const starterCodeThreshold = $("#starter_code_threshold").val();
+            const minimumFileLength = $("#minimum_file_length").val();
+            const courseId = {{ course.id|tojson }};
+            console.log(assignmentId, otherStudentThreshold, starterCodeThreshold, minimumFileLength, courseId);
+        });
+    });
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+    <h1>Run Code Search</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert-warning">
+            {% for message in messages %}
+                {{ message }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This form lets you search for AST elements or text strings across all submissions in multiple courses. 
+    </p>
+
+    <h3>Generate New Report</h3>
+
+    <!-- TODO: Remember choices between page loads -->
+    <form method="post">
+    <strong>Courses with this Quiz: </strong><br>
+    {% for possible_course in all_possible_courses %}
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox"
+                 name="course-id[]"
+                 id="course-id-{{ possible_course.id }}" value="{{ possible_course.id }}"
+                 {%- if possible_course.id == course_id %} checked {%- endif %}
+          >
+          <label class="form-check-label" for="course-id-{{ possible_course.id }}"
+            style="font-weight: normal">
+              {{ possible_course.name }} (<code>{{ possible_course.url }}</code>)
+          </label>
+        </div>
+    {% endfor %}
+    <small class="form-text text-muted">Search across these courses.</small><br>
+
+    <strong>Include Users: </strong><br>
+    {% for role_code, role_name, default_checked in [
+        ("students", "Students", True),
+        ("test", "Test Student(s)", False),
+        ("instructors", "Instructors", False),
+        ("graders", "Graders (includes TAs and instructors)", True),
+        ("anonymous", "Anonymous Users", False)
+    ] %}
+        <div class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox"
+                 name="include-users[]"
+                 id="include-users-{{ role_code }}" value="{{ role_code }}"
+                    {%- if default_checked %} checked {%- endif %}
+          >
+          <label class="form-check-label" for="include-users-{{ role_code }}"
+            style="font-weight: normal">
+            {{ role_name }}
+          </label>
+        </div>
+    {% endfor %}
+    <small class="form-text text-muted">Use submissions from these special users and roles.</small><br>
+    
+    
+    <div>
+        <label>
+            Search for text:
+            <input type="text" class="form-control" id="search-text" name="search-text">
+        </label>
+        <div class="form-text text-muted">Search for this text in the code.</div>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" id="search-text-regex" name="search-text-regex">
+            <label class="form-check-label" for="search-text-regex">Use regular expressions</label>
+        </div>
+    </div>
+
+    <button class="btn btn-outline-secondary" id="generate-report" type="submit">Generate report</button>
+    <small class="form-text text-muted">Might take a while.</small>
+    </form>
+
+    <h3>Existing Reports</h3>
+
+    {% for report in existing_reports %}
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">
+                    {{ report.assignment.name }}
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text">
+                    <strong>Created:</strong> <span title="{{ report.date_created }}">{{ report.date_created|date_description }}</span><br>
+                    <strong>Started:</strong> <span title="{{ report.date_started }}">{{ report.date_started|date_description }}</span><br>
+                    <strong>Finished:</strong> <span title="{{ report.date_finished }}">{{ report.date_finished|date_description }}</span><br>
+                    <strong>User: </strong> <span>{{ report.owner.name() }} ({{ report.owner_id }})</span><br>
+                    <strong>Assignment: </strong> <a href="{{ url_for("courses.submissions_filter", criteria="assignment", search_key=report.assignment_id, course_id=course_id) }}"> {{ report.assignment.name }}</a> ({{ report.assignment.url }})<br>
+                    <strong>Status:</strong> {{ report.status }}<br>
+                    <strong>Message:</strong> {{ report.message }}<br>
+                    <a href="{{ url_for('api.report', report_id=report.id) }}/" class="btn btn-outline-secondary" target="_blank">View Report</a>
+                </p>
+            </div>
+        </div>
+        <br>
+    {% endfor %}
+
+{% endblock %}

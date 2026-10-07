@@ -5,6 +5,7 @@ import logging.config
 def setup_logging(app):
     error_log_path = app.config['ERROR_FILE_PATH']
     event_log_path = app.config['EVENTS_FILE_PATH']
+    task_log_path = app.config['TASKS_FILE_PATH']
     logging_configuration = {
         'version': 1,
         'handlers': {
@@ -27,6 +28,12 @@ def setup_logging(app):
                 'filename': event_log_path,
                 "level": "INFO",
                 'formatter': 'simpleFormatter'
+            },
+            # Logging tasks to a file
+            'taskHandler': {
+                'class': 'logging.handlers.RotatingFileHandler',
+                'filename': task_log_path,
+                "level": "INFO"
             }
         },
         'loggers': {
@@ -38,6 +45,13 @@ def setup_logging(app):
                 'level': 'INFO',
                 'handlers': ['eventHandler']
             },
+            'huey': {
+                'level': "INFO",
+                "handlers": ["taskHandler"]
+            },
+            #'sqlalchemy.engine': {
+            #    'level': "INFO"
+            #}
             #'pylti': {
             #    'level': 'DEBUG',
             #    'handlers': []
@@ -56,7 +70,7 @@ def setup_logging(app):
             }
         }
     }
-    if app.config['IS_PRODUCTION']:
+    if app.config['ROTATE_LOGS']:
         logging_configuration['handlers']['errorHandler']['class'] = 'logging.handlers.TimedRotatingFileHandler'
         logging_configuration['handlers']['errorHandler']['when'] = 'D'
 

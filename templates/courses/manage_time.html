@@ -1,0 +1,284 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Manage Exam Time for Users
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+function resetDateStarted(studentId, assignmentGroupId, action, value) {
+    if (confirm("Are you sure you want to clear this student's start time for this assignment group? This will require the student to click the 'start exam' button again, and then they will have their full time limit from that point. This is useful if a student started the exam but then had technical difficulties and needs to restart it. If you want to decrease the amount of time that they have, make sure to adjust the time limit.")) {
+        $.post(
+            {{ url_for('blockpy.start_assignment')|tojson }},
+            {
+                student_id: studentId,
+                assignment_group_id: assignmentGroupId,
+                course_id: {{ course_id }},
+                date_started: 'clear'
+            },
+            function(data) {
+                if (data.success) {
+                    $("#reset-date-started-"+studentId+"-"+assignmentGroupId).prop("disabled", true);
+                    $("#undo-date-started-"+studentId+"-"+assignmentGroupId).prop("disabled", false);
+
+                } else {
+                    alert("Error: " + data.message);
+                }
+            },
+        );
+    }
+}
+
+function undoDateStarted(studentId, assignmentGroupId, action, value) {
+    $.post(
+        {{ url_for('blockpy.start_assignment')|tojson }},
+        {
+            student_id: studentId,
+            assignment_group_id: assignmentGroupId,
+            course_id: {{ course_id }},
+            date_started: value,
+        },
+        function(data) {
+            if (data.success) {
+                $("#reset-date-started-"+studentId+"-"+assignmentGroupId).prop("disabled", true);
+                $("#undo-date-started-"+studentId+"-"+assignmentGroupId).prop("disabled", true);
+            } else {
+                alert("Error: " + data.message);
+            }
+        },
+    );
+}
+
+function modifyTimeLimit(studentId, amount, resultTarget) {
+    if (amount === null) {
+        alert("Please enter a valid time amount.");
+        return;
+    } else if (amount == 'custom') {
+        amount = $("#custom-set-time-amount-"+studentId).val();
+        if (amount === null || amount.length === 0 || isNaN(amount) || parseInt(amount, 10) <= 0) {
+            alert("Please enter a valid number of minutes for custom time.");
+            return;
+        }
+        amount = amount + "min";
+    }
+    var selected = $("#assignment-group-select").val().join(",");
+    if (selected === null || selected.length === 0) {
+        alert("Please select at least one assignment group to update.");
+        return;
+    }
+    $.post(
+        {{ url_for('courses.modify_time')|tojson}},
+        {
+            assignment_group_ids: selected,
+            student_id: studentId,
+            amount: amount,
+            course_id: {{ course_id }}
+        },
+        function(data) {
+            if (data.success) {
+                const message = data.new_limits.map(
+                    update => `${update.assignment.name}: ${update.time_limit}`
+                ).join(", ");
+                $("#"+resultTarget).html(message);
+            } else {
+                alert("Error: " + data.message);
+            }
+        },
+    );
+}
+
+function MainModel() {
+    var self = this;
+}
+mainModel = new MainModel();
+$().ready(function() {
+    ko.applyBindings(mainModel);
+
+    $("#update-assignment-groups-button").click(function() {
+        var selected = $("#assignment-group-select").val().join(",");
+        if (selected === null || selected.length === 0) {
+            alert("Please select at least one assignment group to update.");
+            return;
+        }
+        window.location.href = {{ url_for('courses.manage_time', course_id=course_id)|tojson }}+"&assignment_group_ids=" + selected;
+    });
+
+
+});
+
+</script>
+
+{% endblock %}
+
+{% block body %}
+
+    <h1>Manage Exam Time for Users</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert alert-warning">
+            {% for message in messages %}
+                {{ message|safe }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This page allows you to edit students' exam time for a given assignment group.
+    </p>
+
+    {% if missing_assignments %}
+
+        <div class="alert alert-warning">
+            <strong>Warning:</strong> The following assignments are missing time limit settings, even though other assignments in the same group have time limits set:
+            <ul>
+            {% for group, aid, assignment in missing_assignments %}
+                <li>{{ group.name }} ({{ group.url }}): {{ assignment.name }} ({{ assignment.url }})</li>
+            {% endfor %}
+            </ul>
+            Please set time limits for these assignments to ensure consistent behavior when modifying exam times.
+        </div>
+
+    {% endif %}
+
+
+    <p>
+        To find a set of assignment groups to modify, you can select from the multi-select below.
+    </p>
+
+    {% if all_timed_groups %}
+
+        <div class="row">
+            <div class="col-sm-6">
+                <select multiple="multiple" size="10" id="assignment-group-select">
+                {% for assignment_group in all_timed_groups.values() %}
+                    <option value="{{ assignment_group.id }}"
+                        {% if assignment_group.id in chosen_assignment_group_ids %}
+                            selected="selected"
+                        {% endif %}
+                    >{{ assignment_group.name }} ({{ assignment_group.url }})</option>
+                {% endfor %}
+                </select>
+                <br><br>
+                <button id="update-assignment-groups-button" class="btn btn-primary">Refresh assignment group display</button>
+            </div>
+            <div class="col-sm-6">
+                <p>
+                    Currently displayed assignment groups:
+                    <ul>
+                        {% for assignment_group in all_timed_groups.values() %}
+                            {% if assignment_group.id in chosen_assignment_group_ids %}
+                                <li>
+                                {{ assignment_group.name }} ({{ assignment_group.url }}):
+                                    <ul>
+                                    {% for assignment in assignment_groups[assignment_group.id] %}
+                                        <li>
+                                            {{ assignment.name }} ({{ assignment.url }}): {{ assignment.get_setting('time_limit', None) }}
+                                        </li>
+                                    {% endfor %}
+                                    </ul>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                    </ul>
+                </p>
+            </div>
+        </div>
+
+        <table class="table table-striped table-bordered table-hover table-condensed">
+            <thead>
+                <tr>
+                    <th width="20%">User</th>
+                    <th>Modified Time Limits</th>
+                    <th>Length Actions</th>
+                    <th>Start Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+
+            {% for role, user in all_users %}
+                <tr>
+                <td>
+                    {{ user.name() }} ({{ user.email }})<br>
+                    <code>{{ role.name }}</code>
+                </td>
+                <td id="time-limit-report-{{ user.id }}">
+                    {% if submissions_by_user[user.id] %}
+                    {% for submission in submissions_by_user[user.id]|sort(attribute='id') %}
+                        {% if submission.time_limit %}
+                            {% if submission.date_started %}
+                                <details>
+                                    <summary>{{ all_timed_assignments[submission.assignment_id].name }}: {{ submission.time_limit }}</summary>
+                                    Started ({{ submission.date_started|date_description }})<br>
+                                </details>
+                            {% else %}
+                                {{ all_timed_assignments[submission.assignment_id].name }}: {{ submission.time_limit }}<br>
+                            {% endif %}
+
+                        {% endif %}
+                    {% endfor %}
+                    {% endif %}
+                </td>
+                <td>
+                    {% for amount in ["1.5x", "2x", "3x"] %}
+                    <button class="btn btn-sm btn-outline-secondary" id="quick-set-time-{{ amount }}"
+                    onclick="modifyTimeLimit({{ user.id }},'{{ amount }}', 'time-limit-report-{{ user.id }}')">
+                        Set to {{ amount }} time
+                    </button>
+                    {% endfor %}
+                    <button class="btn btn-sm btn-outline-secondary" id="quick-set-time-unset"
+                    onclick="modifyTimeLimit({{ user.id }},'', 'time-limit-report-{{ user.id }}')">
+                        Unset (use default time)
+                    </button>
+                    <br><br>
+                    <span class="ml-4">
+                        <input type="number" id="custom-set-time-amount-{{ user.id }}" placeholder="Minutes" style="width: 100px;">
+                        <button class="btn btn-sm btn-outline-secondary"
+                                id="custom-set-time"
+                                onclick="modifyTimeLimit({{ user.id }}, 'custom', 'time-limit-report-{{user.id }}')"
+                        >Set custom number of minutes</button>
+                    </span>
+
+                </td>
+                <td>
+                    {% for assignment_group_id in submissions_by_user[user.id]|selectattr("date_started")|map(attribute="assignment_group_id")|unique|list %}
+                        {% if assignment_group_id %}
+                            {% set group = all_timed_groups[assignment_group_id] %}
+                            {{ group.name }} ({{ group.id }}) started -
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    id="reset-date-started-{{ user.id }}-{{ group.id }}"
+                                    onclick="resetDateStarted({{ user.id }}, {{ group.id }}, 'reset', '')"
+                                    title='If a student has already started the exam, you can use this button to clear the existing start time. This will require the student to click the "start exam" button again, and then they will have their full time limit from that point. This is useful if a student started the exam but then had technical difficulties and needs to restart it. If you want to decrease the amount of time that they have, make sure to adjust the time limit.'
+                            >Clear start time</button>
+                            <!--<button class="btn btn-sm btn-outline-secondary"
+                                    id="undo-date-started-{{ user.id }}-{{ group.id }}"
+                                    onclick="undoDateStarted({{ user.id }}, {{ group.id }}, 'set', "submission.date_started|tojson")"
+                                    disabled
+                                    title="If you accidentally cleared a student's start time, you can use this button to restore the start time to what it was before you cleared it. This will only work if you don't reload the page!"
+                            >Undo clear</button>-->
+                            <br>
+                            <span id="status-date-started-{{ user.id }}-{{ group.id }}"></span>
+                        {% endif %}
+                    {% endfor %}
+                </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+
+    {% else %}
+
+        <p><strong>No timed assignment groups found for this course.</strong></p>
+
+    {% endif %}
+
+{% endblock %}

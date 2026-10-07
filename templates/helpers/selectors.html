@@ -1,0 +1,35 @@
+{% macro select_student(students, criteria, search_key) -%}
+    <label>Student:
+        <select id='search-students'>
+            <option value=''></option>
+            {% for student in students %}
+                <option value='{{ student.id }}'
+                {%- if criteria == "student" and search_key == student.id %} selected
+                {%- endif %} >{{ student.last_name}}, {{ student.first_name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+{% endmacro %}
+
+{% macro select_assignment(assignments_by_group, criteria, search_key) -%}
+    <label>Assignment:
+    <select id='search-assignments'>
+    <option value=''></option>
+    {% for group, assignments in assignments_by_group.items() %}
+        {% if group == None %}
+            <optgroup label="Ungrouped">
+        {% else %}
+            <optgroup label="{{ group }}">
+        {% endif %}
+        {% if assignments %}
+        {% for assignment in assignments %}
+            <option value='{{ assignment.id }}'
+            {%- if criteria == "assignment" and search_key == assignment.id %} selected
+            {%- endif %} >{{ assignment.title() }}</option>
+        {% endfor %}
+        {% endif %}
+        </optgroup>
+    {% endfor %}
+    </select>
+    </label>
+{% endmacro %}

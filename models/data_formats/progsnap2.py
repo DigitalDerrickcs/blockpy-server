@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import shutil
 import tempfile
@@ -9,14 +10,17 @@ import time
 from natsort import natsorted
 from tqdm import tqdm
 
+from common.maybe import maybe_int
 from models.assignment_group import AssignmentGroup
 from models.course import Course
-from models.log import Log
 from models.user import User
+
+from models.log_tables import SubmissionLog as Log
 
 PROGSNAP_CSV_WRITER_OPTIONS = {'delimiter': ',', 'quotechar': '"', 'quoting': csv.QUOTE_MINIMAL}
 
 # TODO: Investigate filenames of instructor files - shouldn't they be _instructor/*?
+
 
 def generate_readme(zip_file):
     zip_file.writestr("Readme.txt", "Generated from BlockPy")
@@ -95,15 +99,43 @@ def blockpy_timestamp_to_iso8601(timestamp):
         return ""
     return datetime.fromtimestamp(int(timestamp) / 1000).isoformat()
 
+"""
+Potential new fields:
+- TermID
+- ProblemID
+- ProblemIsGraded
+- Attempt
+- ExperimentalCondition
+- LoggingErrorID
+- IsFabricatedEvent
+- SessionID
+- ProjectID
+- ResourceID
+- EventInitiator
+- CompileResult: Success, Warning, Error
+- SourceLocation
+- ExecutionID
+- TestID
+- ProgramInput
+- ProgramOutput
+- ProgramErrorOutput
+
+TODO Fixes:
+- Swap the Compile.Error and Run.Program|ProgramErrorOutput events, which were encoded wrong in the database.
+- Capture the ProgramInput and ProgramOutput from Run.Program events.
+
+"""
 
 HEADERS = [
-    'EventID', 'Order', 'SubjectID', 'AssignmentID', 'CourseID',
+    'EventID', 'Order', 'SubjectID', 'AssignmentID', 'CourseID', 'SubmissionID',
     'EventType', 'CodeStateID',
     'ParentEventID',
     'ClientTimestamp', 'ClientTimezone',
     'Score',
     'EditType',
-    'CompileMessageType', 'CompileMessageData', 'CodeStateSection',
+    'CompileMessageType', 'CompileMessageData',
+    'CodeStateSection',
+    'ExecutionResult', 'ProgramInput', 'ProgramOutput', 'ProgramErrorOutput',
     'InterventionCategory', 'InterventionType', 'InterventionMessage',
     'ServerTimestamp', 'ServerTimezone', 'ToolInstances'
 ]
@@ -117,73 +149,143 @@ CODE_STATE_UPDATE_EVENT_TYPES = {
     "File.Create": "GenericEdit"
 }
 
+USE_V1_ERROR_BEHAVIOR = False
 
-def to_progsnap_event(log, order_id, code_states, latest_code_states, scores):
-    fields = [log.id, order_id, log.subject_id, log.assignment_id, log.course_id, log.event_type]
-    submission_identification = (log.subject_id, log.assignment_id, log.course_id)
+
+def extract_inputs_outputs(text):
+    if not text:
+        return "", ""
+    try:
+        content = json.loads(text)
+        return content["inputs"], content["outputs"]
+    except (json.JSONDecodeError, KeyError):
+        # If the text is not JSON or does not have inputs/outputs, store it in the input
+        return text, ""
+
+def extract_error_name(text):
+    if ":" in text:
+        return text[:text.index(":")].strip()
+    return "Unknown"
+
+
+
+def to_progsnap_event(log, order_id, code_states, latest_code_states, scores, submission_lookup):
+    # Read each repeatedly-used column once; attribute access on a result row is slow
+    subject_id, assignment_id, course_id = log.subject_id, log.assignment_id, log.course_id
+    log_event_type, category, message, file_path = log.event_type, log.category, log.message, log.file_path
+    submission_identification = (subject_id, assignment_id, course_id)
+    submission_id = submission_lookup.get(submission_identification, -1)
     # Figure out code_state
-    current_code_base = latest_code_states.get(submission_identification, {})
+    # Only an edit can change a submission's code state, so each submission keeps
+    # its [files, code_state_id] and the files are only rehashed when they change.
+    latest = latest_code_states.get(submission_identification)
     edit_type = ""
-    if log.event_type in CODE_STATE_UPDATE_EVENT_TYPES:
-        current_code_base[log.file_path] = log.message
-        edit_type = CODE_STATE_UPDATE_EVENT_TYPES[log.event_type]
-        latest_code_states[submission_identification] = current_code_base
-    hashed_code_base = tuple(sorted(current_code_base.items()))
-    if hashed_code_base in code_states:
-        code_state_id = code_states[hashed_code_base]
+    if log_event_type in CODE_STATE_UPDATE_EVENT_TYPES:
+        edit_type = CODE_STATE_UPDATE_EVENT_TYPES[log_event_type]
+        if latest is None:
+            latest = latest_code_states[submission_identification] = [{}, None]
+        current_code_base = latest[0]
+        if (latest[1] is None or file_path not in current_code_base
+                or current_code_base[file_path] != message):
+            current_code_base[file_path] = message
+            hashed_code_base = tuple(sorted(current_code_base.items()))
+            latest[1] = code_states.setdefault(hashed_code_base, len(code_states))
+        code_state_id = latest[1]
+    elif latest is not None:
+        code_state_id = latest[1]
     else:
-        code_state_id = len(code_states)
-        code_states[hashed_code_base] = code_state_id
+        code_state_id = code_states.setdefault((), len(code_states))
     # Figure out score
-    if log.event_type == "Intervention" and log.category == "Complete":
+    if log_event_type == "Intervention" and category == "Complete":
         scores[submission_identification] = score = 1
-    elif log.event_type == "X-Submission.LMS":
-        scores[submission_identification] = score = log.message
+    elif log_event_type == "X-Submission.LMS":
+        scores[submission_identification] = score = message
     else:
         score = ""
     # Compile Stuff
-    if log.event_type == "Compile.Error":
-        compile_message_type = "Error"
-        compile_message_data = log.message
-    else:
-        compile_message_type = ""
-        compile_message_data = ""
+    event_type = log_event_type
+    compile_message_type, compile_message_data = "", ""
+    execution_result = ""
+    program_input, program_output, program_error_output = "", "", ""
+    if not USE_V1_ERROR_BEHAVIOR:
+        if log_event_type == "Run.Program" and category == "ProgramErrorOutput":
+            event_type = "Compile.Error"
+            compile_message_type = extract_error_name(message)
+            compile_message_data = message
+        elif log_event_type == "Run.Program":
+            event_type = "Run.Program"
+            execution_result = "Success"
+            program_input, program_output = extract_inputs_outputs(message)
+        elif log_event_type == "Compile.Error":
+            event_type = "Run.Program"
+            execution_result = "Error"
+            program_error_output = message
     # Intervention
-    if log.event_type == "Intervention":
+    if log_event_type == "Intervention":
         intervention_category = "Feedback"
-        intervention_type = log.category + "|" + log.label
-        intervention_message = log.message
+        intervention_type = category + "|" + log.label
+        intervention_message = message
+    elif log_event_type == "Resource.View":
+        intervention_category = category
+        intervention_type = log.label
+        intervention_message = message
     else:
         intervention_category = ""
         intervention_type = ""
         intervention_message = ""
     # Result
-    return fields + [code_state_id,
-                     "",  # TODO: ParentEventId
-                     blockpy_timestamp_to_iso8601(log.client_timestamp),
-                     log.client_timezone,
-                     score,
-                     edit_type,
-                     compile_message_type,
-                     compile_message_data,
-                     log.file_path,
-                     intervention_category,
-                     intervention_type,
-                     intervention_message,
-                     log.date_created.isoformat(),
-                     str(time.timezone // 36).zfill(4),
-                     TOOL_INSTANCE_ID
-                     ]
+    return format_progsnap_event_row(
+        log_id=log.id, order_id=order_id, subject_id=subject_id, assignment_id=assignment_id, course_id=course_id,
+        submission_id=submission_id,
+        event_type=event_type, code_state_id=code_state_id, parent_event_id="",  # ParentEventId is not used
+        client_timestamp=blockpy_timestamp_to_iso8601(log.client_timestamp),
+        client_timezone=log.client_timezone,
+        score=score, edit_type=edit_type, compile_message_type=compile_message_type, compile_message_data=compile_message_data,
+        code_state_section=file_path,
+        execution_result=execution_result, program_input=program_input, program_output=program_output, program_error_output=program_error_output,
+        intervention_category=intervention_category,
+        intervention_type=intervention_type, intervention_message=intervention_message,
+        server_timestamp=log.date_created.isoformat(),
+        server_timezone=str(time.timezone // 36).zfill(4),
+        tool_instances=TOOL_INSTANCE_ID
+    )
 
 
-def generate_maintable(zip_file, course_id, assignment_group_ids):
+  
+def clean_utf8(value):
+    if isinstance(value, str) and not value.isascii():
+        return value.encode("utf-8", "surrogatepass").decode("utf-8", "ignore")
+    return value
+
+def format_progsnap_event_row(log_id, order_id, subject_id, assignment_id, course_id, submission_id, event_type,
+                              code_state_id, parent_event_id, client_timestamp, client_timezone,
+                              score, edit_type, compile_message_type, compile_message_data,
+                              code_state_section,
+                                execution_result, program_input, program_output, program_error_output,
+                              intervention_category, intervention_type,
+                              intervention_message, server_timestamp, server_timezone, tool_instances):
+    return [
+        log_id, order_id, subject_id, assignment_id, course_id, submission_id,
+        event_type, code_state_id, parent_event_id,
+        client_timestamp, client_timezone,
+        score, edit_type, compile_message_type, clean_utf8(compile_message_data),
+        code_state_section,
+        clean_utf8(execution_result), clean_utf8(program_input), clean_utf8(program_output), clean_utf8(program_error_output),
+        intervention_category, intervention_type, clean_utf8(intervention_message),
+        server_timestamp, server_timezone, tool_instances
+    ]
+
+
+def generate_maintable(zip_file, course_id, assignment_group_ids, user_ids, exclude=None):
     code_states, latest_code_states, scores = {}, {}, {}
-    query = Log.query.filter_by(course_id=course_id)
+    query = Log.query.filter_by(course_id=maybe_int(course_id))
     if assignment_group_ids is not None:
         assignment_ids = [assignment.id
                           for group_id in assignment_group_ids
                           for assignment in AssignmentGroup.by_id(group_id).get_assignments()]
         query = query.filter(Log.assignment_id.in_(assignment_ids))
+    if user_ids is not None:
+        query = query.filter(Log.subject_id.in_(user_ids))
     estimated_size = query.count()
     logs = query.order_by(Log.date_created.asc()).yield_per(100)
     tempdir = tempfile.mkdtemp()
@@ -202,15 +304,26 @@ def generate_maintable(zip_file, course_id, assignment_group_ids):
     return "MainTable.csv", code_states
 
 
-def generate_link_subjects(zip_file, course_id):
-    with io.StringIO() as linktable_file:
-        writer = csv.writer(linktable_file, **PROGSNAP_CSV_WRITER_OPTIONS)
-        writer.writerow(["SubjectID", "X-IsStaff", "X-Roles",
-                         "X-Name.Last", "X-Name.First", "X-Email"])
+LINK_SUBJECT_HEADERS = ["SubjectID", "X-IsStaff", "X-Roles",
+                         "X-Name.Last", "X-Name.First", "X-Email"]
 
-        # Get any users explicitly in this course
+
+def get_course_users(course_id, user_ids):
+    # Get any users explicitly in this course
+    users, user_roles = {}, {}
+    if user_ids:
+        for user_id in user_ids:
+            role_users = User.get_user_role(course_id, user_id)
+            if not role_users:
+                continue
+            try:
+                user = role_users[0][1]
+            except IndexError:
+                continue
+            users[user.id] = user
+            user_roles[user.id] = {role.name for role, user in role_users}
+    else:
         users_with_roles = Course.by_id(course_id).get_users()
-        users, user_roles = {}, {}
         for role, user in users_with_roles:
             if user.id not in users:
                 users[user.id] = user
@@ -223,6 +336,15 @@ def generate_link_subjects(zip_file, course_id):
             if log_user.id not in users:
                 users[log_user.id] = log_user
                 user_roles[log_user.id] = {role.name for role in log_user.get_course_roles(course_id)}
+    return users, user_roles
+
+
+def generate_link_subjects(zip_file, course_id, user_ids):
+    with io.StringIO() as linktable_file:
+        writer = csv.writer(linktable_file, **PROGSNAP_CSV_WRITER_OPTIONS)
+        writer.writerow(LINK_SUBJECT_HEADERS)
+
+        users, user_roles = get_course_users(course_id, user_ids)
 
         # Report their information
         for user_id, user in natsorted(users.items(), lambda u: (u[1].last_name, u[1].first_name)):
@@ -240,17 +362,40 @@ def generate_link_subjects(zip_file, course_id):
         return "LinkTables/Subject.csv"
 
 
-def generate_link_assignments(zip_file, course_id, assignment_group_ids):
+LINK_ASSIGNMENT_HEADERS = ["AssignmentId", "X-Version",
+                            "X-Name", "X-URL", "X-Instructions",
+                            "X-Reviewed", "X-Hidden", "X-Settings", "X-Type",
+                            "X-Code.OnRun", "X-Code.OnChange", "X-Code.OnEval",
+                            "X-Code.Starting", "X-Code.ExtraInstructor", "X-Code.ExtraStarting",
+                            "X-Forked.Id", "X-Forked.Version",
+                            "X-Owner.Id", "X-Course.Id",
+                            "X-AssignmentGroup.Ids"]
+LINK_ASSIGNMENT_GROUP_HEADERS = ["AssignmentGroupId", "X-Version",
+                               "X-Name", "X-URL",
+                               "X-Forked.Id", "X-Forked.Version",
+                               "X-Owner.Id", "X-Course.Id"]
+
+
+def get_all_assignments_and_groups(course_id, assignment_group_ids, exclude=None):
+    if exclude is None:
+        exclude = set()
+    else:
+        exclude = set(exclude)
     if assignment_group_ids is None:
         assignments = Log.get_assignments_for_course(course_id)
         all_groups = set()
         assignment_groups = {}
+        kept_assignments = []
         for assignment in assignments:
             groups = AssignmentGroup.by_assignment(assignment.id)
-            all_groups.update(groups)
-            assignment_groups[assignment.id] = groups
+            if not any(group.id in exclude for group in groups):
+                all_groups.update(groups)
+                assignment_groups[assignment.id] = groups
+                kept_assignments.append(assignment)
+        assignments = kept_assignments
     else:
-        all_groups = [AssignmentGroup.by_id(group_id) for group_id in assignment_group_ids]
+        all_groups = [AssignmentGroup.by_id(group_id) for group_id in assignment_group_ids
+                      if group_id not in exclude]
         assignment_groups = {}
         assignments = set()
         for group in all_groups:
@@ -259,23 +404,20 @@ def generate_link_assignments(zip_file, course_id, assignment_group_ids):
                     assignment_groups[assignment.id] = set()
                 assignment_groups[assignment.id].add(group)
                 assignments.add(assignment)
+    return assignments, assignment_groups, all_groups
 
+
+def generate_link_assignments(zip_file, course_id, assignment_group_ids, user_ids):
+    assignments, assignment_groups, all_groups = get_all_assignments_and_groups(course_id, assignment_group_ids)
 
     with io.StringIO() as assignment_file:
         assignment_writer = csv.writer(assignment_file, **PROGSNAP_CSV_WRITER_OPTIONS)
-        assignment_writer.writerow(["AssignmentId", "X-Version",
-                                    "X-Name", "X-URL", "X-Instructions",
-                                    "X-Reviewed", "X-Hidden", "X-Settings",
-                                    "X-Code.OnRun", "X-Code.OnChange", "X-Code.OnEval",
-                                    "X-Code.Starting", "X-Code.ExtraInstructor", "X-Code.ExtraStarting",
-                                    "X-Forked.Id", "X-Forked.Version",
-                                    "X-Owner.Id", "X-Course.Id",
-                                    "X-AssignmentGroup.Ids"])
+        assignment_writer.writerow(LINK_ASSIGNMENT_HEADERS)
         for assignment in natsorted(assignments, key=lambda a: a.name):
             assignment_writer.writerow([
                 assignment.id, assignment.version,
                 assignment.name, assignment.url, assignment.instructions,
-                assignment.reviewed, assignment.hidden, assignment.settings,
+                assignment.reviewed, assignment.hidden, assignment.settings, assignment.type,
                 assignment.on_run, assignment.on_change, assignment.on_eval,
                 assignment.starting_code, assignment.extra_instructor_files, assignment.extra_starting_files,
                 assignment.forked_id, assignment.forked_version,
@@ -288,10 +430,7 @@ def generate_link_assignments(zip_file, course_id, assignment_group_ids):
 
     with io.StringIO() as group_file:
         group_writer = csv.writer(group_file, **PROGSNAP_CSV_WRITER_OPTIONS)
-        group_writer.writerow(["AssignmentGroupId", "X-Version",
-                               "X-Name", "X-URL",
-                               "X-Forked.Id", "X-Forked.Version",
-                               "X-Owner.Id", "X-Course.Id"])
+        group_writer.writerow(LINK_ASSIGNMENT_GROUP_HEADERS)
         for group in natsorted(all_groups, key=lambda g: g.name):
             group_writer.writerow([
                 group.id, group.version,
@@ -304,18 +443,18 @@ def generate_link_assignments(zip_file, course_id, assignment_group_ids):
         yield "LinkTables/AssignmentGroup.csv"
 
 
-def dump_progsnap(zip_file, course_id, assignment_group_ids):
+def dump_progsnap(zip_file, course_id, assignment_group_ids, user_ids):
     yield generate_readme(zip_file)
     yield generate_metadata(zip_file)
-    filename, code_states = generate_maintable(zip_file, course_id, assignment_group_ids)
+    filename, code_states = generate_maintable(zip_file, course_id, assignment_group_ids, user_ids)
     yield filename
     for code_base, code_state_id in tqdm(code_states.items()):
         for filename, contents in code_base:
             path = "CodeStates/{}/{}".format(code_state_id, filename)
             zip_file.writestr(path, contents)
     yield "CodeStates/*"
-    yield generate_link_subjects(zip_file, course_id)
-    for filename in generate_link_assignments(zip_file, course_id, assignment_group_ids):
+    yield generate_link_subjects(zip_file, course_id, user_ids)
+    for filename in generate_link_assignments(zip_file, course_id, assignment_group_ids, user_ids):
         yield filename
     # LinkTables/
     #   Subject.csv + Roles

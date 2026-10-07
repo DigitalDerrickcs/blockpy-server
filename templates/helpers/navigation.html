@@ -1,3 +1,19 @@
-{% macro navigate_course() %}
+{% macro navigate_course(course_id) %}
     <p>Back to <a href="{{ url_for('courses.course', course_id=course_id) }}">Course</a></p>
 {% endmacro %}
+
+{% macro assignment_type_icon(type) -%}
+    {%- if type == 'blockpy' -%}
+        <i class="fas fa-code"></i>
+    {%- elif type == 'maze' -%}
+        <i class="fas fa-location-arrow"></i>
+    {%- elif type =='reading' -%}
+        <i class="fa fa-book-open"></i>
+    {%- elif type =='quiz' -%}
+        <i class="fa fa-tasks"></i>
+    {%- elif type =='feedback' -%}
+        <i class="fa fa-comment-dots"></i>
+    {%- else -%}
+        <i class="fas fa-question-circle"></i>
+    {%- endif -%}
+{%- endmacro %}

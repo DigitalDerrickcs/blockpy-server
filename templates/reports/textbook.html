@@ -1,0 +1,4 @@
+<div xml:lang="en">
+    <h2 id='{{ assignment.slug() }}'>Textbook {{ assignment.name }}</h2>
+    <a href="{{ url_for('assignments.load_textbook', path=assignment.url, embed=True) }}" target="_blank">View textbook</a>
+</div>

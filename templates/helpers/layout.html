@@ -19,9 +19,16 @@
     <script type=text/javascript>
         // Use $SCRIPT_ROOT to access all URLS on the server
         window.$URL_ROOT = {{ request.url_root|tojson|safe }};
+        <!-- TODO: This needs to be able to handle missing access_token -->
+        window.accessToken = {{ (g.access_token or "")|tojson }}
+        
+        window.URLS_UPDATE_SUBMISSION = "{{ url_for('blockpy.update_submission') }}";
     </script>
 
     {% assets "libs_js" %}
+        <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+    {% endassets %}
+    {% assets "skulpt_js" %}
         <script type="text/javascript" src="{{ ASSET_URL }}"></script>
     {% endassets %}
     {% assets "libs_css" %}
@@ -29,143 +36,29 @@
     {% endassets %}
 
     <script type="text/javascript" src="{{  url_for('static', filename='libs/blockpy_server/frontend.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='libs/blockpy_server/frontend.css') }}">
 
-    <style>
-        body {
-            font-size: 14px;
+    <script>
+    class LocalTime extends HTMLElement {
+      connectedCallback() {
+        // const d = new Date(this.getAttribute("utc"));
+        //this.textContent = d.toLocaleString();
+        const utc = this.getAttribute("utc");
+        if (!utc || utc === "Z") {
+          this.textContent = "";
+          return;
         }
-
-        a {
-            text-decoration: underline;
+        try {
+            const d = frontend.prettyPrintDateTime(utc);
+            this.textContent = d;
+        } catch (e) {
+            this.textContent = utc;
         }
+      }
+    }
 
-        a[role="button"], button a, a.btn, .btn a, .nav a, .navbar a,
-        .dropdown-menu a {
-            text-decoration: none;
-        }
-
-        .dropdown-menu, .form-control {
-            font-size: 14px;
-        }
-
-        button, input.btn, a.btn {
-            font-size: 14px;
-        }
-
-        .navbar-inverse .navbar-nav > li > a {
-            color: white;
-        }
-
-        .navbar-inverse a.navbar-brand {
-            color: white;
-        }
-
-        .navbar-inverse .navbar-link.btn.btn-outline-secondary {
-            color: black;
-        }
-
-        .nav-item.active {
-            background-color: black;
-        }
-
-        .bg-dark {
-            background-color: #222 !important;
-        }
-
-        .nav a.dropdown-toggle:focus {
-            outline: 1px solid rgb(77, 144, 254);
-        }
-
-        table caption {
-            color: #333;
-        }
-
-        .label-default {
-            background-color: #444;
-        }
-
-        .btn-outline-secondary {
-            color: black;
-            background-color: white;
-        }
-
-        .btn-sm {
-            font-size: 12px;
-        }
-
-        form label {
-            font-weight: bold;
-        }
-
-        /* Highlight JS */
-        td.hljs-ln-numbers {
-			text-align: center;
-			color: black;
-            background: lightgrey;
-			border-right: 1px solid #999;
-			vertical-align: top;
-			padding-left: 5px;
-
-			-webkit-touch-callout: none;
-			-webkit-user-select: none;
-			-khtml-user-select: none;
-			-moz-user-select: none;
-			-ms-user-select: none;
-			user-select: none;
-		}
-		td.hljs-ln-code {
-			padding-left: 10px;
-		}
-
-		pre.python-code-block code {
-			overflow: auto;
-		}
-
-        code.hljs {
-            background: white;
-            border: 1px solid lightgrey;
-            font-family: monospace;
-            font-size: 14px;
-            padding: 0px;
-        }
-
-        table.hljs-ln tr {
-            border-bottom: 1px dashed #F0F0F0;
-        }
-
-        /* Spinner */
-        .spinner-loader {
-            border: 4px solid #f3f3f3; /* Light grey */
-            border-top: 4px solid #3498db; /* Blue */
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 2s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /** Model Selector **/
-        .model-selector.badge {
-            font-size: 12px;
-        }
-
-        div.overlay {
-            height: 100%;
-            width: 100%;
-            position: fixed;
-            z-index: 1;
-            left: 0;
-            top: 0;
-            background-color: rgba(16, 16, 16, 0.5);
-            overflow-x: hidden; /* Disable horizontal scroll */
-            transition: 0.5s;
-        }
-
-    </style>
+    customElements.define("local-time", LocalTime);
+    </script>
 
     <style>
         {% block extracss %}
@@ -183,8 +76,142 @@
             $(document).ready(function () {
                 $("#{{request.endpoint|replace('.', '\\\\.')}}").parent().addClass("active");
             });
+
+            $(function () {
+                $('[data-toggle="popover"]').popover();
+            });
         {% endif %}
     </script>
+
+    <script>
+        // TODO: Extract this logic into the frontend.js (site/core.js)
+
+        function switchVisible(submissionId, showHide) {
+            $(`#h-${submissionId}-start`).toggle(!showHide);
+            $(`#h-${submissionId}-end`).toggle(showHide);
+        }
+        function logAndAlert(error, args, context) {
+            message = "There was an error while transmitting a submission:\n" +
+                 context.join(", ") + "\n" +
+                (error instanceof String ? error : 
+                    (('message' in error ? error.message +"\n" : "") 
+                    + "\nFull response:\n" + JSON.stringify(error)));
+            console.error(error, args);
+            alert(message);
+        }
+        function regrade(element, submission_id, hard) {
+            const assignmentName = element.getAttribute('data-assignment-name');
+            const userName = element.getAttribute('data-user-name');
+            console.log(assignmentName, userName);
+            const firstChild = element.firstElementChild;
+            let url = "{{ url_for('grading.update_grading_status') }}?submission_id="+submission_id;
+            if (hard) {
+                url = "{{ url_for('blockpy.update_submission') }}?submission_id="+submission_id;
+            }
+            {% if request.values.get('resubmit') == 'hard' %}
+            url = "{{ url_for('blockpy.update_submission') }}?submission_id="+submission_id;
+            {% endif %}
+            //console.log(this, element, submission_id);
+            firstChild.style.backgroundColor = 'white';
+            firstChild.style.color = null;
+            fetch(url, {method: 'POST'}).then((response) => {
+                return response.json()
+            }).then(response => {
+                if (response.success) {
+                    firstChild.className = "green-check-mark";
+                    firstChild.innerHTML = "&#10004;";
+                } else {
+                    firstChild.className = "red-x";
+                    firstChild.innerHTML = "&#10060;"
+                    logAndAlert(response.message, arguments, [userName, assignmentName]);
+                }
+                firstChild.style.backgroundColor = 'transparent';
+            }).catch((error) => {
+                firstChild.style.backgroundColor = 'red';
+                logAndAlert(error, arguments, [userName, assignmentName]);
+            });
+        }
+
+        function estimateDuration(element, submission_id) {
+            let url = "{{ url_for('blockpy.estimate_duration') }}?submission_id="+submission_id;
+            element.style.backgroundColor = 'white';
+            fetch(url, {method: 'GET'}).then((response) => {
+                return response.json()
+            }).then(response => {
+                if (response.success) {
+                    element.className = "green-check-mark";
+                    element.innerHTML = forHumans(response.duration);
+                } else {
+                    element.className = "red-x";
+                    element.innerHTML = "&#10060;"
+                }
+                element.style.backgroundColor = 'transparent';
+            }).catch(() => {
+                element.style.backgroundColor = 'red';
+                console.error(arguments);
+            }).finally(() => {
+            });
+        }
+
+        /**
+         * Translates seconds into human readable format of seconds, minutes, hours, days, and years
+         *
+         * @param  {number} seconds The number of seconds to be processed
+         * @return {string}         The phrase describing the amount of time
+         */
+        function forHumans ( seconds ) {
+            if (!seconds) {
+                return '0 seconds';
+            }
+            var levels = [
+                [Math.floor(seconds / 31536000), 'years'],
+                [Math.floor((seconds % 31536000) / 86400), 'days'],
+                [Math.floor(((seconds % 31536000) % 86400) / 3600), 'hours'],
+                [Math.floor((((seconds % 31536000) % 86400) % 3600) / 60), 'minutes'],
+                [Math.floor((((seconds % 31536000) % 86400) % 3600) % 60), 'seconds'],
+            ];
+            var returntext = '';
+
+            for (var i = 0, max = levels.length; i < max; i++) {
+                if ( levels[i][0] === 0 ) continue;
+                returntext += ' ' + levels[i][0] + ' ' + (levels[i][0] === 1 ? levels[i][1].substr(0, levels[i][1].length-1): levels[i][1]);
+            };
+            return returntext.trim();
+        }
+        </script>
+
+
+        <script>
+
+        function inIframe () {
+            try {
+                return window.self !== window.top;
+            } catch (e) {
+                return true;
+            }
+        }
+        function relaunchInWindow(targetUrl) {
+            if (!targetUrl) {
+                targetUrl = {{ url_for('assignments.load', _external=True,grade_mode='dashboard')|tojson }};
+            }
+            window.parent.postMessage(
+              {
+                subject: 'requestFullWindowLaunch',
+                data: {
+                  url: targetUrl,
+                  placement: 'course_navigation',
+                  launchType: 'new_window',
+
+                  launchOptions: {
+                    width: 1000,
+                    height: 800,
+                  },
+                },
+              },
+              '*'
+            )
+        }
+        </script>
 
 
 </head>
@@ -193,12 +220,12 @@
 {% if not reduced_layout %}
     <nav class="navbar navbar-expand-md navbar-dark bg-dark">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('index') }}">
+            <a class="navbar-brand" href="{{ url_for('basic.index') }}">
                 <img alt="BlockPy Brand"
                      role='presentation'
                      src="{{ url_for('static', filename='images/blockpy-puzzle-logo.png') }}">
             </a>
-            <a class="navbar-brand" href="{{ url_for('index') }}">BlockPy</a>
+            <a class="navbar-brand" href="{{ url_for('basic.index') }}">BlockPy</a>
             <button type="button" class="navbar-toggler collapsed"
                     data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar"
                     aria-label="Toggle navigation">
@@ -208,7 +235,7 @@
             <div id="navbar" class="collapse navbar-collapse">
                 <ul class="navbar-nav mr-auto">
                     <li class="nav-item">
-                        <a class="nav-link" id='index' href="{{ url_for('index') }}">Home</a>
+                        <a class="nav-link" id='index' href="{{ url_for('basic.index') }}">Home</a>
                     </li>
                     {% if g.user %}
                         <li class="nav-item">
@@ -224,8 +251,16 @@
                         </li>
                     {% endif %}
                 </ul>
+                {% if g.user and g.user.anonymous %}
+                    <a tabindex="0" role="button" type="button" class="navbar-text btn btn-danger mr-4 text-white"
+                            data-trigger="focus"
+                        data-toggle="popover" title="Guest Account" data-content="You are NOT logged in as a regular user. Your work will not be saved and graded. Please use the buttons to the right to login properly!">
+                        <span class="fas fa-exclamation-circle"></span>
+                        Guest Account
+                    </a>
+                {% endif %}
                 <form class="form-inline">
-                    {% if g.user %}
+                    {% if g.user and not g.user.anonymous %}
                         <span class="navbar-text">
                         Signed in as {{ g.user.name() }}
                             <a href="{{ url_for('security.logout') }}"
@@ -269,7 +304,11 @@
     <div class="container-fluid">
         <p class="pull-right">
             {% if g.user %}
-                You are {{ g.user.name() }}<span> ({{ g.user.email }})</span>
+                {% if g.user.anonymous %}
+                    You are a guest user<span> ({{ g.user.first_name }})</span>
+                {% else %}
+                    You are {{ g.user.name() }}<span> ({{ g.user.email }})</span>
+                {% endif %}
                 {%  if g.course %}
                     <span>in {{ g.course.name }}</span>
                 {% endif %}
@@ -280,7 +319,7 @@
         </p>
         <p>
             <small>
-                &copy; Copyright 2019 <a href="https://acbart.com">Austin Cory Bart</a>, Luke Gusukuma, Dennis Kafura.
+                &copy; Copyright 2026 <a href="https://acbart.com">Austin Cory Bart</a>, Luke Gusukuma, Dennis Kafura.
             </small>
         </p>
     </div>

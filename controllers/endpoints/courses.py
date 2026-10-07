@@ -1,0 +1,2025 @@
+import io
+import csv
+import time
+import statistics
+from datetime import datetime, timezone
+from pprint import pprint
+from collections import defaultdict, Counter
+import json
+from natsort import natsorted
+from sqlalchemy import func, case, select
+from sqlalchemy.orm import undefer, joinedload
+
+from flask_wtf import Form
+from wtforms import IntegerField, BooleanField, StringField, SubmitField, SelectField, TextAreaField, HiddenField
+
+from flask import Blueprint, send_from_directory
+from flask import Flask, redirect, url_for, session, request, jsonify, g, \
+    make_response, Response, render_template, flash, abort, current_app
+
+from common.dates import epoch_to_datetime, datetime_to_string
+from common.highlighters import strip_tags
+from controllers.auth import get_user
+from controllers.helpers import (get_lti_property, require_request_parameters, login_required,
+                                 require_course_instructor, require_course_grader, get_select_menu_link,
+                                 check_resource_exists, get_course_id, ajax_success, ajax_failure, maybe_int,
+                                 maybe_bool, require_admin, check_course_unlocked,
+                                 make_log_entry)
+from controllers.submission_search import (parse_submission_search, matches_search_criteria,
+                                           encode_submission_for_filter, search_load_options,
+                                           prefetch_search_relations, VIEW_SUBMISSIONS_SEARCH_FIELDS,
+                                           ANALYTICS_SEARCH_FIELDS)
+from models.data_formats.time_analysis import (parse_idle_minutes, load_time_analysis_events, analyze_time,
+                                       format_duration)
+from models.data_formats.quiz_analysis import (analyze_quiz, load_roles_by_user_course, select_quiz_submissions,
+                                               QUIZ_ROLE_OPTIONS, QUIZ_ROLE_CODES, DEFAULT_QUIZ_ROLES)
+from models.data_formats.report import make_report
+from models import db, AssignmentGroup, AssignmentGroupMembership, SubmissionCounts
+from models.data_formats.portation import export_bundle
+from models.enums import USER_DISPLAY_ROLES, SubmissionLogEvent
+from models.enums.roles import RolePermissions
+from models.user import User
+from models.course import Course
+from models.role import Role
+from models.submission import Submission
+from models.assignment import Assignment
+from models.report import Report
+from models.log_tables import SubmissionLog as Log
+from tasks import tasks
+
+courses = Blueprint('courses', __name__, url_prefix='/courses')
+
+
+class AddCourseForm(Form):
+    name = StringField("Name", description="A title for the course, shown when navigating to the course on BlockPy.")
+    visibility = SelectField('Visibility',
+                             choices=[('private', 'Private'), ('public', 'Public'),
+                                      ('archived', 'Archived')],
+                             description="Public courses are visible to all users, but private courses are not visible outside of folks with roles in that course. Archived courses are concluded courses that should not be shown anymore (they can be restored). ")
+    term = StringField("Term")
+    url = StringField("URL", description="A unique URL for the course. Must be different from any other URLs for other courses. I recommend using underscores.")
+    submit = SubmitField("Add new course")
+
+
+SETTINGS_EXPLANATION = """
+Additional JSON settings for the course
+"""
+
+class EditCourseForm(AddCourseForm):
+    id = HiddenField("id", description="The ID of the course, used to identify it in the database.")
+    settings = TextAreaField("Settings", description=SETTINGS_EXPLANATION)
+    submit = SubmitField("Edit course")
+
+@courses.route('/add', methods=['GET', 'POST'])
+@courses.route('/add/', methods=['GET', 'POST'])
+@login_required
+def add():
+    """
+    Create a new course with the given information
+    """
+    add_form = AddCourseForm(request.form)
+    if request.method == 'POST':
+        new_course = Course.new(name=add_form.name.data,
+                                owner_id=g.user.id,
+                                visibility=add_form.visibility.data,
+                                term=add_form.term.data,
+                                url=add_form.url.data)
+        if new_course:
+            flash('New course added')
+            return redirect(url_for('courses.index'))
+        else:
+            flash('Course not created; Non-unique URL perhaps?')
+    return render_template('courses/add.html', add_form=add_form)
+
+
+@courses.route('/edit/<course_id>', methods=['GET', 'POST'])
+@courses.route('/edit/<course_id>/', methods=['GET', 'POST'])
+@login_required
+def edit(course_id):
+    """
+    Edit an existing course.
+    """
+    user, user_id = get_user()
+    if not user.in_course(course_id):
+        flash(f"You are not in {course_id}")
+        return redirect(url_for('courses.index'))
+    course = Course.by_id(course_id)
+    if not user.is_instructor(course_id):
+        flash(f"You are not an instructor in course: {course_id}")
+        return redirect(url_for("courses.index"))
+
+    edit_form = EditCourseForm(request.form, obj=course)
+    if request.method == 'POST':
+        course_id = edit_form.id.data
+        course = Course.by_id(course_id)
+        # Verify exists
+        check_resource_exists(course, "Course", course_id)
+        # Verify permissions
+        require_course_instructor(g.user, course_id)
+        check_course_unlocked(course)
+        # Edit the course
+        course_url = edit_form.url.data
+        if not Course.check_url_is_unique(course_url, course_id):
+            flash('Course not edited; URLs must be unique.')
+        else:
+
+            # Safety check the settings is proper JSON
+            try:
+                json.loads(edit_form.settings.data)
+            except json.JSONDecodeError as e:
+                flash(f"Settings are not valid JSON: {e}")
+                modified = False
+            else:
+                modified = course.edit(name=edit_form.name.data,
+                                       visibility=edit_form.visibility.data,
+                                       term=edit_form.term.data,
+                                       url=edit_form.url.data,
+                                       settings=edit_form.settings.data)
+            if modified:
+                flash('Course settings updated')
+            else:
+                flash('No modifications were made')
+    return render_template('courses/edit.html', edit_form=edit_form, course=course, course_id=course_id)
+
+
+@courses.route('/remove/', methods=['GET', 'POST'])
+@courses.route('/remove', methods=['GET', 'POST'])
+@require_request_parameters('course_id')
+@login_required
+def remove_course():
+    course_id = int(request.values.get('course_id'))
+    course = Course.by_id(course_id)
+    # Verify exists
+    check_resource_exists(course, "Course", course_id)
+    # Verify permissions
+    require_admin(g.user)
+    check_course_unlocked(course)
+    # Perform action
+    Course.remove(course_id)
+    flash('Course removed')
+    return redirect(url_for('courses.index'))
+
+
+@courses.route('/change_course_visibility/', methods=['GET', 'POST'])
+@courses.route('/change_course_visibility', methods=['GET', 'POST'])
+@require_request_parameters('course_id', 'visibility')
+@login_required
+def change_course_visibility():
+    course_id = int(request.values.get('course_id'))
+    visibility = request.values.get('visibility')
+    course = Course.by_id(course_id)
+    # Verify exists
+    check_resource_exists(course, "Course", course_id)
+    # Verify permissions
+    require_course_instructor(g.user, course_id)
+    check_course_unlocked(course)
+    # Perform action
+    success = Course.change_course_visibility(course_id, visibility)
+    if success:
+        flash(f'Course {course.url} visibility set to f{visibility}')
+    return redirect(url_for('courses.index'))
+
+
+@courses.route('/pin_course/', methods=['GET', 'POST'])
+@courses.route('/pin_course', methods=['GET', 'POST'])
+@require_request_parameters('course_id', 'pin_status')
+@login_required
+def pin_course():
+    course_id = int(request.values.get('course_id'))
+    pin_status = maybe_bool(request.values.get('pin_status'))
+    course = Course.by_id(course_id)
+    # Verify exists
+    check_resource_exists(course, "Course", course_id)
+    # Verify permissions
+    require_course_instructor(g.user, course_id)
+    check_course_unlocked(course)
+    # Perform action
+    try:
+        course.set_setting("pinned", pin_status, g.user)
+        return ajax_success({"updatedSettings": course.settings})
+    except Exception as e:
+        return ajax_failure("Failed to set pinned status:"+str(e))
+
+
+@courses.route('/rename', methods=['GET', 'POST'])
+@courses.route('/rename/', methods=['GET', 'POST'])
+@require_request_parameters('course_id', 'name')
+@login_required
+def rename_course():
+    course_id = int(request.values.get('course_id'))
+    course = Course.by_id(course_id)
+    # Verify exists
+    check_resource_exists(course, "Course", course_id)
+    # Verify permissions
+    require_course_instructor(g.user, course_id)
+    check_course_unlocked(course)
+    # Perform action
+    new_name = request.values.get('name')
+    Course.rename(course_id, new_name)
+    return jsonify(success=True)
+
+
+@courses.route('/add_canvas/', methods=['GET', 'POST'])
+@courses.route('/add_canvas', methods=['GET', 'POST'])
+@login_required
+def add_canvas():
+    """
+    Create a new assignment with the given information
+    """
+    return render_template('courses/add_canvas.html')
+
+
+@courses.route('/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/<course_id>', methods=['GET', 'POST'])
+def course(course_id):
+    user, user_id = get_user()
+    if course_id.isdigit():
+        course_id = int(course_id)
+        course: Course = Course.by_id(course_id)
+    else:
+        course: Course = Course.by_url(course_id)
+    check_resource_exists(course, "Course", course_id)
+    if not user.in_course(course_id) and course.visibility != "public":
+        flash("You are not a user in this course and/or it is not public.")
+        return redirect(url_for('courses.index'))
+    is_instructor = user.is_instructor(course_id)
+    is_grader = user.is_grader(course_id)
+    textbooks = course.get_textbooks()
+    return render_template('courses/course.html',
+                               course=course,
+                               course_id=course_id,
+                               is_grader=is_grader,
+                               is_instructor=is_instructor,
+                               textbooks=textbooks)
+    #return view_assignments(course_id)
+
+
+@courses.route('/assignments/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/assignments/<course_id>', methods=['GET', 'POST'])
+@login_required
+def assignments(course_id):
+    user, user_id = get_user()
+    course_id = maybe_int(course_id)
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    if not user.is_instructor(course_id):
+        flash(f"You are not an instructor in course: {course_id}")
+        return redirect(url_for('courses.index'))
+    return render_template('courses/assignments.html',
+                           course_id=course_id,
+                           user=user,
+                           course=course)
+
+@courses.route('/users/', methods=['GET'])
+@courses.route('/users', methods=['GET'])
+@login_required
+def users():
+    user_ids = request.values.get('user_ids', "")
+    course_id = get_course_id()
+    user, user_id = get_user()
+    if course_id is None:
+        return ajax_failure("You are not in a course context.")
+    is_grader = user.is_grader(course_id)
+    if not is_grader and user_ids != str(user_id):
+        return ajax_failure("You do not have permissions to see those users.", 403)
+    users = []
+    errors = []
+    # If blank, then get all the available users
+    if not user_ids:
+        course = Course.by_id(course_id)
+        check_resource_exists(course, "Course", course_id)
+        user_roles = course.get_users()
+        user_data = {}
+        for role, user in user_roles:
+            if user not in user_data:
+                user_data[user] = user.encode_json()
+                user_data[user]['roles'] = []
+            user_data[user]['roles'].append(role.encode_json())
+        users.extend(user_data.values())
+    # Otherwise, get the subset suggested
+    else:
+        for user_id in user_ids.split(","):
+            if not user_id.isdigit():
+                errors.append(f"Unknown User ID: {user_id!r}")
+                continue
+            user_id = int(user_id)
+            # With Course Role Information
+            user = User.by_id(user_id)
+            check_resource_exists(user, "User", user_id)
+            user_data = user.encode_json()
+            user_data['roles'] = [r.encode_json() for r in user.get_course_roles(course_id)]
+            users.append(user_data)
+    return ajax_success(dict(users=users, errors=errors))
+
+
+@courses.route('/manage_assignments/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/manage_assignments/<course_id>', methods=['GET', 'POST'])
+@login_required
+def manage_assignments(course_id):
+    return redirect(url_for('courses.assignments', course_id=course_id))
+
+
+@courses.route('/manage_assignments/get/', methods=['GET'])
+@courses.route('/manage_assignments/get', methods=['GET'])
+@login_required
+def get_assignments():
+    course_id = get_course_id()
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    require_course_instructor(g.user, course_id)
+    # Only this course's assignments, groups, and memberships
+    assignments = Assignment.by_course(course_id, exclude_builtins=False)
+    groups = AssignmentGroup.by_course(course_id)
+    memberships = AssignmentGroupMembership.by_course(course_id)
+    return ajax_success(dict(
+        assignments=[assignment.encode_json() for assignment in assignments],
+        groups=[group.encode_json() for group in groups],
+        memberships=[membership.encode_json() for membership in memberships],
+        course_id=course_id))
+
+
+@courses.route('/watch_events/', methods=['GET'])
+@courses.route('/watch_events', methods=['GET'])
+@login_required
+def watch_events():
+    course_id = get_course_id(False)
+    user, user_id = get_user()
+    return render_template('courses/watch_events.html', course_id=course_id, user=user)
+
+
+
+@courses.route('/view_assignments/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/view_assignments/<course_id>', methods=['GET', 'POST'])
+@login_required
+def view_assignments(course_id):
+    course = Course.by_id(course_id)
+    if not g.user.in_course(course_id) and course.visibility != "public":
+        return redirect(url_for('courses.index'))
+    assignments = Assignment.by_course(course_id)
+    default_assignment = course.get_default_assignment()
+    groups = natsorted(AssignmentGroup.by_course(course_id), key=lambda g: g.name)
+    is_instructor = g.user.is_instructor(course.id)
+    is_grader = g.user.is_grader(course.id)
+    return render_template('courses/view_assignments.html', assignments=assignments,
+                           groups=groups, course=course, is_instructor=is_instructor,
+                           is_grader=is_grader,
+                           course_id=course_id, default_assignment=default_assignment)
+
+
+@courses.route('/', methods=['GET', 'POST'])
+def index():
+    """
+    List all of the courses associated with the user.
+    """
+    user, user_id = get_user()
+    # Get this user's course with their roles
+    my_courses = []
+    if user:
+        my_courses = user.get_courses()
+    # Get all public courses
+    public_courses = Course.get_public()
+
+    return render_template('courses/index.html',
+                           user=user,
+                           my_courses=my_courses,
+                           public_courses=public_courses)
+
+
+@courses.route('/manage_users/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/manage_users/<course_id>', methods=['GET', 'POST'])
+@login_required
+def manage_users(course_id):
+    ''' List all the users in the course '''
+    if not g.user.in_course(course_id):
+        return redirect(url_for('courses.index'))
+    is_instructor = g.user.is_instructor(int(course_id))
+    if not is_instructor:
+        return abort(403, description="You are not an instructor in this course!")
+    students = Course.by_id(int(course_id)).get_users()
+    return render_template('courses/manage_users.html',
+                           students=students,
+                           course_id=course_id,
+                           is_instructor=is_instructor)
+
+
+class AddUsersForm(Form):
+    # invite = BooleanField("Add Without Invitation")
+    # send_email = BooleanField('Send Email')
+    new_users = TextAreaField("Emails")
+    role = SelectField("Role", choices=list(USER_DISPLAY_ROLES.items()))
+    submit = SubmitField("Add student")
+
+
+@courses.route('/add_users/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/add_users/<course_id>', methods=['GET', 'POST'])
+@login_required
+def add_users(course_id):
+    ''' Generate a form to add a student '''
+    if not g.user.is_instructor(int(course_id)):
+        return redirect(url_for('courses.index'))
+    course_id = int(course_id)
+    add_form = AddUsersForm(request.form)
+    if request.method == 'POST':
+        newly_created = []
+        newly_added = []
+        for new_email in add_form.new_users.data.split("\n"):
+            first_name, last_name = '', ''
+            if '|' in new_email:
+                first_name, last_name, new_email = new_email.split('|', maxsplit=2)
+            new_user = User.find_student(email=new_email.strip())
+            if new_user is None:
+                new_user = current_app.user_datastore.create_user(first_name=first_name,
+                                                                  last_name=last_name,
+                                                                  email=new_email,
+                                                                  confirmed_at=datetime.now(timezone.utc))
+                newly_created.append(new_user)
+            new_role = add_form.role.data
+            # TODO: Update this to reflect new enums
+            if new_role in ('student', 'learner') and not new_user.is_student(course_id):
+                new_user.add_role('learner', course_id=course_id)
+                newly_added.append(new_user)
+            elif new_role == 'teachingassistant' and not new_user.is_grader(course_id):
+                new_user.add_role('teachingassistant', course_id=course_id)
+                newly_added.append(new_user)
+            elif new_role == 'instructor' and not new_user.is_instructor(course_id):
+                new_user.add_role('instructor', course_id=course_id)
+                newly_added.append(new_user)
+            # TODO: Add an invite for the course and that user
+            # TODO: Send an email to reset their password
+        flash('New users added: ' + ", ".join([u.email for u in newly_added]))
+        return redirect(url_for('courses.manage_users', course_id=course_id))
+    return render_template('courses/add_users.html', add_form=add_form, course_id=course_id)
+
+
+@courses.route('/remove_role/<role_id>/', methods=['GET', 'POST'])
+@courses.route('/remove_role/<role_id>', methods=['GET', 'POST'])
+@login_required
+def remove_role(role_id):
+    ''' Endpoint to bounce a student from the course '''
+    role = Role.by_id(int(role_id))
+    if role is None:
+        return "Role not found"
+    course_id = role.course_id
+    is_instructor = g.user.is_instructor(course_id)
+    if not is_instructor:
+        return "You're not an instructor in this course!"
+    role.remove()
+    return redirect(url_for('courses.manage_users', course_id=course_id))
+
+
+@courses.route('/change_role/', methods=['GET', 'POST'])
+@courses.route('/change_role', methods=['GET', 'POST'])
+@login_required
+def change_role():
+    ''' Endpoint to change the role of a student '''
+    role_id = maybe_int(request.values.get("role_id"))
+    new_role = request.values.get("new_role")
+    if role_id is None or new_role is None:
+        return "Invalid role_id or new_role not given"
+    role = Role.by_id(role_id)
+    if role is None:
+        return "Role not found"
+    course_id = role.course_id
+    is_instructor = g.user.is_instructor(course_id)
+    if not is_instructor:
+        return "You're not an instructor in this course!"
+    role.update_role(new_role)
+    return ajax_success({"new_role": new_role})
+
+
+
+def grader_dashboard(user, course_id):
+    pending_review = [(s, u, a) for (s, u, a) in Submission.by_pending_review(course_id)
+                      if u.is_student(course_id)]
+    users = {user.email: user.encode_json() for _, user, _ in pending_review}
+    is_instructor = user.is_instructor(course_id)
+    course = Course.by_id(course_id)
+    textbooks = course.get_textbooks()
+
+    return render_template('courses/dashboard_grader.html', embed=True,
+                           course_id=course_id, user=user, pending_review=pending_review,
+                           users=users, is_instructor=is_instructor, textbooks=textbooks)
+
+@courses.route('dashboard/', methods=['GET', 'POST'])
+@courses.route('dashboard', methods=['GET', 'POST'])
+def dashboard():
+    force_default_assignment = maybe_bool(request.values.get('force_default_assignment', "false"))
+    if 'user' not in g and not g.user:
+        return "You are not logged in."
+    as_student = maybe_bool(request.values.get('as_student', "false"))
+    course_id = get_course_id()
+    user, user_id = get_user()
+    if course_id is None:
+        return "You are not in a course context."
+    is_grader = user.is_grader(course_id)
+    if is_grader and not force_default_assignment and not as_student:
+        return grader_dashboard(user, course_id)
+
+    course = Course.by_id(course_id)
+    assignment = course.get_default_assignment()
+    if force_default_assignment and assignment is not None:
+        return redirect(url_for("blockpy.load", assignment_id=assignment.id,
+                                course_id=course_id, user_id=user_id, force_download=False,
+                                embed=True))
+    else:
+        # Sub - Assign - Group
+        textbooks = course.get_textbooks()
+        grouped_assignments = natsorted(course.get_users_submitted_assignments_grouped(user_id),
+                                        key=lambda r: (
+                                        r.AssignmentGroup.name if r.AssignmentGroup is not None else "~~~~~~~~",
+                                        r.Assignment.title()))
+        assignments_by_group = {}
+        for row in grouped_assignments:
+            #group_name = row.AssignmentGroup.name if row.AssignmentGroup is not None else None
+            assignments_by_group.setdefault(row.AssignmentGroup, []).append(
+                (row.Submission, row.Assignment, row.AssignmentGroup)
+            )
+        # Horrifying hack to move Ungrouped elements to end
+        if None in assignments_by_group:
+            assignments_by_group[None] = assignments_by_group.pop(None)
+        return render_template('courses/dashboard.html', embed=True,
+                               course_id=course_id, user=user, textbooks=textbooks,
+                               assignments_by_group=assignments_by_group)
+
+
+@courses.route('/config/', methods=['GET', 'POST'])
+@courses.route('/config', methods=['GET', 'POST'])
+def config():
+    """ Provide course configuration
+    """
+    return render_template('courses/config.html',
+                           xml_content=render_template('courses/config.xml',
+                                                       version=current_app.config['SITE_VERSION']))
+    # return Response(render_template('courses/config.xml',
+    #                                version=app.config['SITE_VERSION']),
+    #                mimetype='text/xml')
+
+@courses.route('/submissions_user/<course_id>/<owner_id>/', methods=['GET', 'POST'])
+@courses.route('/submissions_user/<course_id>/<owner_id>', methods=['GET', 'POST'])
+@login_required
+def submissions_user(course_id, owner_id):
+    ''' List all the users in the course '''
+    course_id = int(course_id)
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    user, user_id = get_user()
+    if course_id is not None:
+        is_grader = user.is_grader(course_id)
+    else:
+        is_grader = False
+    is_owner = user_id == maybe_int(owner_id)
+    if not is_grader and not is_owner:
+        return "You are not an instructor or the owner of the assignment!"
+    owner = User.by_id(maybe_int(owner_id))
+    assignments = natsorted(course.get_submitted_assignments(),
+                            key=lambda r: r.name)
+    all_subs = Submission.by_student(maybe_int(owner_id), course_id)
+    all_subs = {s[0].assignment_id: s for s in all_subs}
+    submissions = [all_subs.get(assignment.id, (None, owner, assignment))
+                   for assignment in assignments]
+    return render_template('courses/submissions_user.html',
+                           course_id=course_id,
+                           assignments=assignments,
+                           submissions=submissions,
+                           owner=owner,
+                           is_instructor=is_grader)
+
+
+@courses.route('/submissions_filter/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/submissions_filter/<course_id>', methods=['GET', 'POST'])
+@login_required
+def submissions_filter(course_id):
+    ''' Interface for filtering a course's submissions by user set and/or assignment set.
+    The submission data comes from the `submissions_filter/get` endpoint below; the
+    course's users and assignments are embedded here so the selectors populate instantly. '''
+    is_grader = g.user.is_grader(int(course_id))
+    if not is_grader:
+        return "You are not an instructor or TA in this course!"
+    course_id = int(course_id)
+    course = Course.by_id(course_id)
+    criteria = request.values.get("criteria", "none")
+    search_key = maybe_int(request.values.get("search_key", "-1"))
+    # Users with their course roles, in the same shape as `courses/users`
+    user_data = {}
+    for role, user in course.get_users():
+        if user.id not in user_data:
+            user_data[user.id] = user.encode_json()
+            user_data[user.id]['roles'] = []
+        user_data[user.id]['roles'].append(role.encode_json())
+    # Assignments with index-aligned groups, in the same shape as `assignments/get_ids`
+    grouped_assignments, scopes, _ = g.safely.load_submitted_assignments_grouped(
+        course_id, abort_on_error=False)
+    grouped_assignments = [ga for ga, scope in zip(grouped_assignments, scopes)
+                           if scope.can_grade]
+    return render_template('courses/submissions_filter.html',
+                           course_id=course_id,
+                           course=course,
+                           user=g.user,
+                           criteria=criteria,
+                           search_key=search_key if search_key is not None else -1,
+                           users=list(user_data.values()),
+                           assignments=[ga.Assignment.encode_json() for ga in grouped_assignments],
+                           groups=[ga.AssignmentGroup.encode_json() if ga.AssignmentGroup is not None else None
+                                   for ga in grouped_assignments],
+                           is_instructor=is_grader)
+
+
+@courses.route('/submissions_filter/get/', methods=['GET', 'POST'])
+@courses.route('/submissions_filter/get', methods=['GET', 'POST'])
+@login_required
+def submissions_filter_data():
+    ''' JSON feed of this course's submissions, optionally narrowed down to
+    specific assignments and/or users, and optionally searched by criteria
+    (score, correctness, code/feedback contents, statuses, dates, ...). '''
+    course_id = get_course_id()
+    require_course_grader(g.user, course_id)
+    assignment_ids = [int(aid) for aid in request.values.get('assignment_ids', "").split(",")
+                      if aid.strip().isdigit()]
+    user_ids = [int(uid) for uid in request.values.get('user_ids', "").split(",")
+                if uid.strip().isdigit()]
+    combinator, criteria, search_errors = parse_submission_search(
+        request.values.get('search', ""), VIEW_SUBMISSIONS_SEARCH_FIELDS)
+    load_options = search_load_options(criteria)
+    query = (Submission.query
+             .filter(Submission.course_id == course_id)
+             .options(*load_options))
+    if assignment_ids:
+        query = query.filter(Submission.assignment_id.in_(assignment_ids))
+    if user_ids:
+        query = query.filter(Submission.user_id.in_(user_ids))
+    submissions = query.all()
+    if criteria:
+        # Batch-load any users/assignments/groups the criteria read, held in a
+        # local so the identity map keeps them for the evaluation loop.
+        _search_relations = prefetch_search_relations(submissions, criteria)
+        submissions = [submission for submission in submissions
+                       if matches_search_criteria(submission, combinator, criteria)]
+    # Batch-prefetch the assignments (for human statuses) and quiz submission code
+    # (for quiz attempt status), holding them in locals so the identity map keeps them.
+    _assignments = Assignment.query.filter(
+        Assignment.id.in_({s.assignment_id for s in submissions})).all() if submissions else []
+    quiz_submission_ids = [s.id for s in submissions
+                           if s.assignment is not None and s.assignment.type == "quiz"]
+    _quiz_code = (Submission.query.filter(Submission.id.in_(quiz_submission_ids))
+                  .options(undefer(Submission.code)).all()) if quiz_submission_ids else []
+    return ajax_success(dict(
+        submissions=[encode_submission_for_filter(submission) for submission in submissions],
+        search_errors=search_errors))
+
+
+@courses.route('/analytics/<int:course_id>/', methods=['GET', 'POST'])
+@courses.route('/analytics/<int:course_id>', methods=['GET', 'POST'])
+@login_required
+def course_analytics(course_id):
+    ''' The Course Analytics dashboard: statistics and visualizations over the
+    course's submissions and their activity counters. Mirrors `submissions_filter`:
+    grader-only, with the course's users and grouped assignments embedded so the
+    selectors populate instantly; the numbers come from the `analytics/rollup`
+    and `analytics/detail` endpoints below. '''
+    course_id = int(course_id)
+    is_grader = g.user.is_grader(course_id)
+    if not is_grader:
+        return "You are not an instructor or TA in this course!"
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    # Users with their course roles, in the same shape as `courses/users`
+    user_data = {}
+    for role, user in course.get_users():
+        if user.id not in user_data:
+            user_data[user.id] = user.encode_json()
+            user_data[user.id]['roles'] = []
+        user_data[user.id]['roles'].append(role.encode_json())
+    grouped_assignments, scopes, _ = g.safely.load_submitted_assignments_grouped(
+        course_id, abort_on_error=False)
+    grouped_assignments = [ga for ga, scope in zip(grouped_assignments, scopes)
+                           if scope.can_grade]
+    # Default selection: the most recent assignment group with student activity,
+    # so first paint answers "how is the current lesson going" without loading
+    # the whole course.
+    recent_group = (db.session.query(Submission.assignment_group_id)
+                    .filter(Submission.course_id == course_id,
+                            Submission.assignment_group_id.isnot(None))
+                    .group_by(Submission.assignment_group_id)
+                    .order_by(func.max(Submission.date_modified).desc())
+                    .first())
+    default_assignment_ids = []
+    if recent_group is not None:
+        default_assignment_ids = [ga.Assignment.id for ga in grouped_assignments
+                                  if ga.AssignmentGroup is not None
+                                  and ga.AssignmentGroup.id == recent_group[0]]
+    return render_template('courses/analytics.html',
+                           course_id=course_id,
+                           course=course,
+                           user=g.user,
+                           users=list(user_data.values()),
+                           assignments=[ga.Assignment.encode_json() for ga in grouped_assignments],
+                           groups=[ga.AssignmentGroup.encode_json() if ga.AssignmentGroup is not None else None
+                                   for ga in grouped_assignments],
+                           default_assignment_ids=default_assignment_ids,
+                           is_instructor=is_grader)
+
+
+def _analytics_scope_filters(course_id, assignment_ids, user_ids):
+    filters = [Submission.course_id == course_id]
+    if assignment_ids:
+        filters.append(Submission.assignment_id.in_(assignment_ids))
+    if user_ids:
+        filters.append(Submission.user_id.in_(user_ids))
+    return filters
+
+
+def _analytics_rollup_rows(filters, grain_column):
+    """ One aggregate row per distinct `grain_column` value (assignment or user)
+    for the submissions matching `filters`: submission-status funnel counts,
+    correct count, score stats, last activity, and per-metric sum/n/median.
+    Aggregation happens in SQL on Postgres (medians via percentile_cont); the
+    SQLite dev fallback aggregates plain column tuples in Python. """
+    rows = {}
+
+    def row_for(key):
+        if key not in rows:
+            rows[key] = {"id": key, "n": 0, "correct": 0,
+                         "mean_score": None, "median_score": None, "median_attempts": None,
+                         "last_activity": None, "statuses": {}, "metrics": {}}
+        return rows[key]
+
+    if db.engine.dialect.name == "postgresql":
+        funnel = (select(grain_column, Submission.submission_status, func.count())
+                  .filter(*filters).group_by(grain_column, Submission.submission_status))
+        for key, status, count in db.session.execute(funnel):
+            row_for(key)["statuses"][str(status)] = count
+        stats = (select(grain_column, func.count(),
+                        func.sum(case((Submission.correct, 1), else_=0)),
+                        func.avg(Submission.score),
+                        func.percentile_cont(0.5).within_group(Submission.score),
+                        func.percentile_cont(0.5).within_group(Submission.attempts),
+                        func.max(Submission.date_modified))
+                 .filter(*filters).group_by(grain_column))
+        for key, n, correct, mean_score, median_score, median_attempts, last_activity \
+                in db.session.execute(stats):
+            row = row_for(key)
+            row["n"] = n
+            row["correct"] = int(correct or 0)
+            row["mean_score"] = float(mean_score) if mean_score is not None else None
+            row["median_score"] = float(median_score) if median_score is not None else None
+            row["median_attempts"] = float(median_attempts) if median_attempts is not None else None
+            row["last_activity"] = datetime_to_string(last_activity)
+        metrics = (select(grain_column, SubmissionCounts.metric,
+                          func.sum(SubmissionCounts.value), func.count(),
+                          func.percentile_cont(0.5).within_group(SubmissionCounts.value))
+                   .join(Submission, SubmissionCounts.submission_id == Submission.id)
+                   .filter(*filters).group_by(grain_column, SubmissionCounts.metric))
+        for key, metric, total, n, median in db.session.execute(metrics):
+            row_for(key)["metrics"][str(metric)] = {
+                "sum": int(total), "n": n,
+                "median": float(median) if median is not None else None}
+    else:
+        # Dev fallback: plain column tuples, pivoted in Python (dev datasets are small)
+        submissions = db.session.execute(
+            select(grain_column, Submission.correct, Submission.score,
+                   Submission.attempts, Submission.submission_status,
+                   Submission.date_modified)
+            .filter(*filters)).all()
+        scores = defaultdict(list)
+        attempts = defaultdict(list)
+        for key, correct, score, attempt_count, status, date_modified in submissions:
+            row = row_for(key)
+            row["n"] += 1
+            row["correct"] += 1 if correct else 0
+            row["statuses"][str(status)] = row["statuses"].get(str(status), 0) + 1
+            if score is not None:
+                scores[key].append(score)
+            if attempt_count is not None:
+                attempts[key].append(attempt_count)
+            if date_modified is not None and (row["last_activity"] is None
+                                              or row["last_activity"] < datetime_to_string(date_modified)):
+                row["last_activity"] = datetime_to_string(date_modified)
+        for key, values in scores.items():
+            rows[key]["mean_score"] = statistics.mean(values)
+            rows[key]["median_score"] = statistics.median(values)
+        for key, values in attempts.items():
+            rows[key]["median_attempts"] = float(statistics.median(values))
+        counts = db.session.execute(
+            select(grain_column, SubmissionCounts.metric, SubmissionCounts.value)
+            .join(Submission, SubmissionCounts.submission_id == Submission.id)
+            .filter(*filters)).all()
+        values_by_metric = defaultdict(list)
+        for key, metric, value in counts:
+            values_by_metric[(key, str(metric))].append(value)
+        for (key, metric), values in values_by_metric.items():
+            row_for(key)["metrics"][metric] = {
+                "sum": sum(values), "n": len(values),
+                "median": float(statistics.median(values))}
+    return list(rows.values())
+
+
+@courses.route('/analytics/rollup/', methods=['GET', 'POST'])
+@courses.route('/analytics/rollup', methods=['GET', 'POST'])
+@login_required
+def analytics_rollup():
+    ''' JSON aggregates for the analytics dashboard's tables and tiles: one row
+    per assignment and one per student for the selection, aggregated in SQL —
+    the payload never contains per-submission data. '''
+    course_id = get_course_id()
+    require_course_grader(g.user, course_id)
+    assignment_ids = [int(aid) for aid in request.values.get('assignment_ids', "").split(",")
+                      if aid.strip().isdigit()]
+    user_ids = [int(uid) for uid in request.values.get('user_ids', "").split(",")
+                if uid.strip().isdigit()]
+    filters = _analytics_scope_filters(course_id, assignment_ids, user_ids)
+    return ajax_success(dict(
+        assignments=_analytics_rollup_rows(filters, Submission.assignment_id),
+        students=_analytics_rollup_rows(filters, Submission.user_id),
+        # Served live from GROUP BY queries for now; when the rollup tables land,
+        # this becomes their refresh watermark.
+        data_as_of=datetime_to_string(datetime.now(timezone.utc))))
+
+
+# The analytics detail endpoint refuses unscoped requests and scopes larger than
+# this many submissions; per-submission payloads are for drill-downs only.
+ANALYTICS_DETAIL_CAP = 2000
+
+
+@courses.route('/analytics/detail/', methods=['GET', 'POST'])
+@courses.route('/analytics/detail', methods=['GET', 'POST'])
+@login_required
+def analytics_detail():
+    ''' Per-submission JSON for an explicitly scoped analytics drill-down (some
+    assignments, some students, or one exam group): the submissions-filter
+    encoding plus dates, attempts, and the pivoted counter metrics. Metrics
+    with no row are omitted, not zero-filled — that is how the frontend tells
+    "no data" from 0. '''
+    course_id = get_course_id()
+    require_course_grader(g.user, course_id)
+    assignment_ids = [int(aid) for aid in request.values.get('assignment_ids', "").split(",")
+                      if aid.strip().isdigit()]
+    user_ids = [int(uid) for uid in request.values.get('user_ids', "").split(",")
+                if uid.strip().isdigit()]
+    assignment_group_id = maybe_int(request.values.get('assignment_group_id'))
+    if not assignment_ids and not user_ids and assignment_group_id is None:
+        return ajax_failure("The analytics detail endpoint requires a scope: "
+                            "assignment_ids, user_ids, or assignment_group_id.")
+    combinator, criteria, search_errors = parse_submission_search(
+        request.values.get('search', ""), ANALYTICS_SEARCH_FIELDS)
+    query = (Submission.query
+             .filter(*_analytics_scope_filters(course_id, assignment_ids, user_ids))
+             .options(*search_load_options(criteria)))
+    if assignment_group_id is not None:
+        query = query.filter(Submission.assignment_group_id == assignment_group_id)
+    if query.count() > ANALYTICS_DETAIL_CAP:
+        return ajax_failure(f"That scope covers more than {ANALYTICS_DETAIL_CAP} submissions; "
+                            "narrow the selection to drill down.")
+    submissions = query.all()
+    # Pivot the counters: submission_id -> {metric: value}, absent metrics omitted
+    metrics_by_submission = defaultdict(dict)
+    if submissions:
+        counter_rows = db.session.execute(
+            select(SubmissionCounts.submission_id, SubmissionCounts.metric,
+                   SubmissionCounts.value)
+            .filter(SubmissionCounts.submission_id.in_([s.id for s in submissions])))
+        for submission_id, metric, value in counter_rows:
+            metrics_by_submission[submission_id][str(metric)] = value
+    if criteria:
+        # Batch-load any users/assignments/groups the criteria read, held in a
+        # local so the identity map keeps them for the evaluation loop.
+        _search_relations = prefetch_search_relations(submissions, criteria)
+        submissions = [submission for submission in submissions
+                       if matches_search_criteria(submission, combinator, criteria,
+                                                  metrics_by_submission.get(submission.id))]
+    encoded = []
+    for submission in submissions:
+        entry = encode_submission_for_filter(submission)
+        entry["date_started"] = datetime_to_string(submission.date_started)
+        entry["date_due"] = datetime_to_string(submission.date_due)
+        entry["attempts"] = submission.attempts
+        entry["metrics"] = metrics_by_submission.get(submission.id, {})
+        encoded.append(entry)
+    return ajax_success(dict(submissions=encoded, search_errors=search_errors))
+
+
+@courses.route('/feedback_editor/<course_id>/', methods=['GET'])
+@courses.route('/feedback_editor/<course_id>', methods=['GET'])
+@login_required
+def feedback_editor(course_id):
+    """ Review and edit every student's feedback submission for a FEEDBACK assignment. """
+    course_id = int(course_id)
+    is_grader = g.user.is_grader(course_id)
+    if not is_grader:
+        return "You are not an instructor or TA in this course!"
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    # Feedback assignments owned by this course, plus any others already submitted to in it
+    feedback_assignments = {a.id: a for a in
+                            Assignment.query.filter_by(course_id=course_id, type='feedback').all()}
+    for row in course.get_submitted_assignments_grouped(by_type='feedback'):
+        feedback_assignments.setdefault(row.Assignment.id, row.Assignment)
+    feedback_assignments = natsorted(feedback_assignments.values(), key=lambda a: a.title())
+    assignment_id = maybe_int(request.values.get("assignment_id"))
+    assignment = None
+    rows = []
+    if assignment_id is not None:
+        assignment = Assignment.by_id(assignment_id)
+        check_resource_exists(assignment, "Assignment", assignment_id)
+        if assignment.type != 'feedback':
+            return "That assignment is not a Feedback assignment!"
+        students = natsorted(course.get_students(), key=lambda r: r.name())
+        all_subs = {s[0].user_id: s[0] for s in Submission.by_assignment(assignment_id, course_id)}
+        for student in students:
+            submission = all_subs.get(student.id)
+            contents, published, extra = "", False, {}
+            if submission and submission.code:
+                try:
+                    data = json.loads(submission.code)
+                    contents = data.get("contents", "") or ""
+                    published = bool(data.get("published", False))
+                    # Any other fields (e.g., the `cadence` provenance block of an
+                    # uploaded export) ride along so that saving does not drop them
+                    extra = {key: value for key, value in data.items()
+                             if key not in ("contents", "published")}
+                except (ValueError, AttributeError):
+                    # Not JSON (or not an object); surface the raw code for repair
+                    contents = submission.code
+            rows.append({
+                "student": student,
+                "submission": submission,
+                "contents": contents,
+                "published": published,
+                "extra": extra,
+            })
+    return render_template('courses/feedback_editor.html',
+                           course_id=course_id,
+                           course=course,
+                           feedback_assignments=feedback_assignments,
+                           assignment=assignment,
+                           assignment_id=assignment_id,
+                           rows=rows,
+                           is_instructor=is_grader)
+
+
+def _can_adopt_from(user, source_course):
+    """ Instructors can adopt from public courses and from any course where they have an adopter-level role. """
+    if source_course.visibility == 'public':
+        return True
+    if user.is_grader(source_course.id):
+        return True
+    role_names = {role.name.lower() for role in user.get_course_roles(source_course.id)}
+    return bool(role_names & {str(role) for role in RolePermissions.ADOPTER_ROLES})
+
+
+def _adoptable_courses(user, course_id):
+    """
+    The courses that the user could adopt assignments from, other than the given one.
+    Returns (courses with a role, public courses without a role), each a list of (course, role description).
+    """
+    with_role, roles_by_course = [], defaultdict(list)
+    for course, role in user.get_courses():
+        if course.id != course_id:
+            roles_by_course[course.id].append(role)
+    for roles in roles_by_course.values():
+        course = roles[0].course
+        if _can_adopt_from(user, course):
+            with_role.append((course, ", ".join(sorted({USER_DISPLAY_ROLES.get(role.name, role.name)
+                                                      for role in roles}))))
+    public = [(course, "Public") for course in Course.get_public()
+              if course.id != course_id and course.id not in roles_by_course]
+    key = lambda pair: (pair[0].name or "", pair[0].id)
+    return natsorted(with_role, key=key), natsorted(public, key=key)
+
+
+def _adoption_rows(user_id, course_id, source_course):
+    """
+    Describe every assignment of the source course (grouped) along with its adoption status in the
+    target course. Returns a list of (group, [row]) where each row has the assignment and status.
+    """
+    grouped = natsorted(source_course.get_assignments_grouped(),
+                        key=lambda r: (r.AssignmentGroup.name if r.AssignmentGroup is not None else "~~~~~~~~",
+                                       r.Assignment.title()))
+    assignment_ids = [row.Assignment.id for row in grouped]
+    counts = Submission.count_by_assignments(course_id, assignment_ids)
+    own = Submission.by_user_and_assignments(user_id, course_id, assignment_ids)
+    groups = {}
+    for assignment, group in grouped:
+        submission = own.get(assignment.id)
+        total = counts.get(assignment.id, 0)
+        others = total - (1 if submission is not None else 0)
+        groups.setdefault(group, []).append({
+            "assignment": assignment,
+            "title": assignment.title(),
+            "submission": submission,
+            "adopted": total > 0,
+            "other_submissions": others,
+            "can_unadopt": submission is not None and others == 0,
+            "has_changes": submission is not None and submission.has_changes(),
+        })
+    return list(groups.items())
+
+
+@courses.route('/adopt_assignments/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/adopt_assignments/<course_id>', methods=['GET', 'POST'])
+@login_required
+def adopt_assignments(course_id):
+    """
+    Let an instructor "adopt" assignments (or whole assignment groups) from other courses into this one.
+    Adopting just creates an instructor submission for the assignment in this course, which is enough
+    for it to show up in the course's views. Unadopting deletes that instructor submission again, as
+    long as nobody else has submitted to the assignment in this course.
+    """
+    course_id = int(course_id)
+    user, user_id = get_user()
+    if not user.is_instructor(course_id):
+        return "You are not an instructor in this course!"
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    source_course_id = maybe_int(request.values.get("source_course_id"))
+    source_course = None
+    if source_course_id is not None:
+        source_course = Course.by_id(source_course_id)
+        check_resource_exists(source_course, "Course", source_course_id)
+        if source_course_id == course_id:
+            return "You cannot adopt assignments from the course itself!"
+        if not _can_adopt_from(user, source_course):
+            return "You do not have permission to adopt assignments from that course (course ID {})!".format(
+                source_course_id)
+
+    if request.method == 'POST':
+        if source_course is None:
+            return "You must choose a course to adopt assignments from first."
+        check_course_unlocked(course)
+        action = request.values.get("action", "")
+        force = maybe_bool(request.values.get("force", "false"))
+        assignment_id = maybe_int(request.values.get("assignment_id"))
+        assignment_group_id = maybe_int(request.values.get("assignment_group_id"))
+        group = None
+        if assignment_group_id is not None:
+            group = AssignmentGroup.by_id(assignment_group_id)
+            check_resource_exists(group, "Assignment Group", assignment_group_id)
+        # Figure out which assignments the action applies to
+        rows_by_group = dict(_adoption_rows(user_id, course_id, source_course))
+        if action in ("adopt_assignment", "unadopt_assignment"):
+            targets = [row for rows in rows_by_group.values() for row in rows
+                       if row["assignment"].id == assignment_id]
+            if not targets:
+                return "That assignment (ID {}) is not part of the source course!".format(assignment_id)
+        elif action in ("adopt_group", "unadopt_group"):
+            targets = [row for rows_group, rows in rows_by_group.items()
+                       if rows_group is not None and rows_group.id == assignment_group_id
+                       for row in rows]
+            if group is None or not targets:
+                return "That assignment group (ID {}) is not part of the source course!".format(assignment_group_id)
+        else:
+            return "Unknown action: {}".format(action)
+        messages = []
+        if action.startswith("adopt"):
+            adopted = 0
+            for row in targets:
+                _, created = Submission.adopt(row["assignment"], user_id, course_id,
+                                              assignment_group_id=group.id if group else None)
+                if created:
+                    adopted += 1
+            messages.append("Adopted {} assignment(s).".format(adopted))
+            if adopted < len(targets):
+                messages.append("{} were already adopted.".format(len(targets) - adopted))
+        else:
+            blocked = [row for row in targets if row["submission"] is not None and not row["can_unadopt"]]
+            changed = [row for row in targets if row["can_unadopt"] and row["has_changes"]]
+            if blocked:
+                messages.append("Cannot unadopt {} assignment(s) because other users have submissions: {}".format(
+                    len(blocked), ", ".join(row["assignment"].title() for row in blocked)))
+            if changed and not force:
+                flash("Your submission has changes (version {}) for: {}. Unadopting will delete those changes; "
+                      "confirm the unadopt to proceed anyway.".format(
+                          ", ".join(str(row["submission"].version) for row in changed),
+                          ", ".join(row["assignment"].title() for row in changed)))
+                return redirect(url_for('courses.adopt_assignments', course_id=course_id,
+                                        source_course_id=source_course_id))
+            removed = 0
+            for row in targets:
+                if row["can_unadopt"]:
+                    row["submission"].delete_completely()
+                    removed += 1
+            messages.append("Unadopted {} assignment(s).".format(removed))
+        flash(" ".join(messages))
+        return redirect(url_for('courses.adopt_assignments', course_id=course_id,
+                                source_course_id=source_course_id))
+
+    courses_with_role, public_courses = [], []
+    adoption_groups = []
+    if source_course is None:
+        courses_with_role, public_courses = _adoptable_courses(user, course_id)
+    else:
+        adoption_groups = _adoption_rows(user_id, course_id, source_course)
+    return render_template('courses/adopt_assignments.html',
+                           course_id=course_id,
+                           course=course,
+                           source_course=source_course,
+                           courses_with_role=courses_with_role,
+                           public_courses=public_courses,
+                           adoption_groups=adoption_groups,
+                           is_instructor=True)
+
+
+@courses.route('/submissions_specific/<submission_id>/', methods=['GET', 'POST'])
+@courses.route('/submissions_specific/<submission_id>', methods=['GET', 'POST'])
+@login_required
+def submissions_specific(submission_id):
+    ''' List all the users in the course '''
+    submission, user, assignment = Submission.full_by_id(int(submission_id))
+    if submission is None:
+        return "Submission not found"
+    course_id = submission.course_id
+    if course_id is not None:
+        is_instructor = g.user.is_instructor(int(course_id))
+    else:
+        is_instructor = False
+    is_owner = g.user.id == submission.user_id
+    if not is_instructor and not is_owner:
+        return "You are not an instructor or the owner of the assignment!"
+    return render_template('courses/submissions_specific.html',
+                           submission=submission,
+                           assignment=assignment,
+                           user=user,
+                           course_id=course_id)
+
+
+@courses.route('/time_analysis/<int:course_id>/<int:user_id>/', methods=['GET'])
+@courses.route('/time_analysis/<int:course_id>/<int:user_id>', methods=['GET'])
+@login_required
+def time_analysis(course_id, user_id):
+    ''' How a student spent their time on an assignment group (e.g., an exam) or a single
+        assignment: active time vs. idle gaps with no events, work sessions, a per-assignment
+        breakdown, and a minute-by-minute log. Linked from the View Submissions dropdowns. '''
+    viewer, _ = get_user()
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    student = User.by_id(user_id)
+    check_resource_exists(student, "User", user_id)
+    require_course_grader(viewer, course_id)
+    assignment_group_id = maybe_int(request.values.get('assignment_group_id'))
+    assignment_id = maybe_int(request.values.get('assignment_id'))
+    if assignment_group_id is not None:
+        group = AssignmentGroup.by_id(assignment_group_id)
+        check_resource_exists(group, "AssignmentGroup", assignment_group_id)
+        assignments = group.get_assignments()
+        scope_name = group.name
+    elif assignment_id is not None:
+        group = None
+        assignment = Assignment.by_id(assignment_id)
+        check_resource_exists(assignment, "Assignment", assignment_id)
+        assignments = [assignment]
+        scope_name = assignment.name
+    else:
+        return ajax_failure("You must provide either an assignment_group_id or an assignment_id.")
+    # Hidden assignments (typically exams) are for instructors only, like the group report
+    if any(assignment.hidden for assignment in assignments):
+        require_course_instructor(viewer, course_id)
+    idle_minutes = parse_idle_minutes(request.values.get('idle_minutes'))
+    assignment_ids = [assignment.id for assignment in assignments]
+    assignment_names = {assignment.id: assignment.name for assignment in assignments}
+    events = load_time_analysis_events(course_id, user_id, assignment_ids)
+    analysis = analyze_time(events, idle_minutes * 60, assignment_names)
+    submissions = {submission.assignment_id: submission
+                   for submission in Submission.query.filter(
+                       Submission.course_id == course_id, Submission.user_id == user_id,
+                       Submission.assignment_id.in_(assignment_ids)).all()} if assignment_ids else {}
+    # Exam timing: the standard limit and any accommodation, from the first timed assignment
+    time_limit, accommodation, date_started = None, None, None
+    for assignment in assignments:
+        base_limit = assignment.get_setting('time_limit', None)
+        submission = submissions.get(assignment.id)
+        if base_limit is not None and time_limit is None:
+            time_limit, accommodation = _describe_exam_time(
+                base_limit, submission.time_limit if submission else None)
+        if submission is not None and submission.date_started and date_started is None:
+            date_started = submission.date_started
+    date_submitted = max((submission.date_submitted for submission in submissions.values()
+                          if submission.date_submitted), default=None)
+    return render_template('courses/time_analysis.html',
+                           course_id=course_id, course=course, student=student,
+                           group=group, assignments=assignments, submissions=submissions,
+                           assignment_names=assignment_names,
+                           scope_name=scope_name, analysis=analysis, idle_minutes=idle_minutes,
+                           time_limit=time_limit, accommodation=accommodation,
+                           date_started=date_started, date_submitted=date_submitted,
+                           format_duration=format_duration,
+                           is_instructor=True)
+
+
+@courses.route('/quiz_analysis/<int:course_id>/', methods=['GET'])
+@courses.route('/quiz_analysis/<int:course_id>', methods=['GET'])
+@login_required
+def quiz_analysis(course_id):
+    ''' Item analysis of one quiz's submissions, computed on request instead of by
+        the background quiz report: score distribution, per-question difficulty and
+        discrimination, and how often each answer was chosen. Without an assignment
+        it lists the course's quizzes to pick from. Cheap enough to run inline: the
+        submissions load in one query (with their owners), roles in one more, and
+        the grading itself is pure Python over the answer JSON (about 50ms for a
+        thousand submissions). '''
+    started = time.perf_counter()
+    viewer, viewer_id = get_user()
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    require_course_grader(viewer, course_id)
+    # The course's quizzes with submissions, grouped, plus how many submissions each has here
+    quizzes = course.get_submitted_assignments_grouped('quiz').all()
+    quiz_ids = [quiz.id for quiz, _ in quizzes]
+    submission_counts = dict(
+        db.session.query(Submission.assignment_id, func.count(Submission.id))
+        .filter(Submission.course_id == course_id, Submission.assignment_id.in_(quiz_ids))
+        .group_by(Submission.assignment_id).all()) if quiz_ids else {}
+    groups = {}
+    for quiz, group in quizzes:
+        groups.setdefault(group, []).append(quiz)
+    context = dict(course_id=course_id, course=course, groups=groups, submission_counts=submission_counts,
+                   role_options=QUIZ_ROLE_OPTIONS, assignment=None, analysis=None,
+                   is_instructor=viewer.is_instructor(course_id))
+    assignment_id = maybe_int(request.values.get('assignment_id'))
+    if assignment_id is None:
+        return render_template('courses/quiz_analysis.html', **context)
+    if assignment_id not in set(quiz_ids):
+        return ajax_failure(f"Assignment {assignment_id} is not a quiz with submissions in this course.")
+    assignment = Assignment.by_id(assignment_id)
+    check_resource_exists(assignment, "Assignment", assignment_id)
+    # Hidden quizzes (typically exams) are for instructors only, like the group report
+    if assignment.hidden:
+        require_course_instructor(viewer, course_id)
+    # Other courses with submissions to this quiz, offered only where the viewer can grade
+    course_rows = (db.session.query(Submission.course_id, func.count(Submission.id))
+                   .filter(Submission.assignment_id == assignment_id)
+                   .group_by(Submission.course_id).all())
+    other_course_ids = [other_id for other_id, _ in course_rows if other_id != course_id]
+    gradable = {role.course_id for role in Role.query.filter(
+        Role.user_id == viewer_id, Role.course_id.in_(other_course_ids),
+        Role.name.in_(RolePermissions.GRADER_ROLES)).all()} if other_course_ids else set()
+    allowed_course_ids = [other_id for other_id, _ in course_rows
+                          if other_id == course_id or other_id in gradable]
+    courses_by_id = {other.id: other for other in
+                     Course.query.filter(Course.id.in_(allowed_course_ids)).all()} if allowed_course_ids else {}
+    available_courses = [(courses_by_id[other_id], count) for other_id, count in course_rows
+                         if other_id in courses_by_id]
+    # Which of those courses, and which kinds of users, to include
+    selected_course_ids = [maybe_int(value) for value in request.values.getlist('course_ids')]
+    if not selected_course_ids:
+        selected_course_ids = [course_id]
+    if any(other_id not in courses_by_id for other_id in selected_course_ids):
+        return ajax_failure("You can only include courses where you are a grader and this quiz has submissions.")
+    if 'roles_set' in request.values:
+        included_roles = set(request.values.getlist('roles'))
+    else:
+        included_roles = set(DEFAULT_QUIZ_ROLES)
+    if not included_roles <= QUIZ_ROLE_CODES:
+        return ajax_failure(f"Unknown roles: {sorted(included_roles - QUIZ_ROLE_CODES)}")
+    # Load, filter, and analyze
+    submissions = (Submission.query
+                   .filter(Submission.assignment_id == assignment_id,
+                           Submission.course_id.in_(selected_course_ids))
+                   .options(joinedload(Submission.user)).all())
+    roles_by_user_course = load_roles_by_user_course({submission.user_id for submission in submissions},
+                                                     selected_course_ids)
+    included, excluded = select_quiz_submissions(submissions, included_roles, roles_by_user_course)
+    analysis = analyze_quiz(assignment, included)
+    users = {submission.user_id: submission.user for submission in included}
+    ranked = sorted(analysis.submissions,
+                    key=lambda summary: (-summary.score, users[summary.user_id].name().lower()
+                                         if summary.user_id in users else ""))
+    skipped_reasons = Counter(reason for _, reason in analysis.skipped)
+    context.update(assignment=assignment, analysis=analysis, ranked=ranked, users=users,
+                   courses_by_id=courses_by_id, available_courses=available_courses,
+                   selected_course_ids=selected_course_ids, included_roles=included_roles,
+                   excluded=excluded, skipped_reasons=skipped_reasons,
+                   loaded_count=len(submissions), included_count=len(included),
+                   elapsed_ms=(time.perf_counter() - started) * 1000)
+    return render_template('courses/quiz_analysis.html', **context)
+
+
+@courses.route('/submissions_grid/<course_id>/', methods=['GET', 'POST'])
+@courses.route('/submissions_grid/<course_id>', methods=['GET', 'POST'])
+@login_required
+def submissions_grid(course_id):
+    ''' List all the users in the course '''
+    course_id = get_course_id(course_id)
+    user, user_id = get_user()
+    # Check permissions
+    require_course_grader(user, course_id)
+    # Get course
+    course = Course.by_id(course_id)
+    # Organize the students and non-students
+    users = course.get_users()
+    students, non_students = set(), set()
+    for role, user in users:
+        if "learner" in role.name.lower():
+            students.add(user)
+        else:
+            non_students.add(user)
+            if user in students:
+                students.remove(user)
+    students = natsorted(students, key=lambda s: s.name())
+    non_students = natsorted(non_students, key=lambda s: s.name())
+    students = list(students) + list(non_students)
+    # Get all the assignments
+    assignments = natsorted(course.get_submitted_assignments_grouped(),
+                            key=lambda r: r[0].name)
+    grouped_assignments = defaultdict(list)
+    total_points = 0
+    for assignment, group in assignments:
+        grouped_assignments[group].append(assignment)
+        total_points += (assignment.points or 1)
+    #assignment_groups = course.get_assignment_groups()
+    submissions = {(s.assignment_id, s.user_id): s for s in course.get_submissions()}
+    scores = {}
+    for student in students:
+        scores[student.id] = 0
+        for assignment, group in assignments:
+            if (assignment.id, student.id) in submissions:
+                submission = submissions[(assignment.id, student.id)]
+                scores[student.id] += ((assignment.points or 1)
+                                       if submission.correct else
+                                       (submission.score or 0)/100 * (assignment.points or 1))
+    return render_template('courses/submissions_grid.html',
+                           course_id=course_id,
+                           students=students,
+                           submissions=submissions,
+                           total_points=total_points,
+                           scores=scores,
+                           assignment_groups=grouped_assignments,
+                           grouped_assignments=grouped_assignments,
+                           is_instructor=True)
+
+
+@courses.route('/making_problems', methods=['GET', 'POST'])
+@courses.route('/making_problems/', methods=['GET', 'POST'])
+def making_problems():
+    """
+    Making problems instructions
+    """
+
+    return render_template('courses/making_problems.html')
+
+
+def switch_course():
+    # TODO: Create the ability to switch current course without going through canvas
+    pass
+
+# TODO: update course via JSON file or API
+
+
+@courses.route('/fix_course_outcome_url/', methods=['GET', 'POST'])
+@courses.route('/fix_course_outcome_url', methods=['GET', 'POST'])
+@require_request_parameters('new_url')
+@login_required
+def fix_course_outcome_url():
+    new_url = request.values.get("new_url")
+    course_id = get_course_id()
+    user, user_id = get_user()
+    require_course_instructor(user, course_id)
+    course = Course.by_id(course_id)
+    course.update_endpoint(new_url)
+    return ajax_success({"success": "True"})
+
+
+def unpack(value):
+    if isinstance(value, list):
+        return value[0]
+    return value
+
+
+@courses.route('/student_report/', methods=['GET', 'POST'])
+@courses.route('/student_report', methods=['GET', 'POST'])
+@login_required
+def student_report():
+    ''' List all the users in the course '''
+    course_id = get_course_id()
+    user, user_id = get_user()
+    student_id = maybe_int(request.values.get('user_id'))
+
+    if course_id is not None:
+        is_instructor = user.is_grader(int(course_id))
+    else:
+        is_instructor = False
+    is_owner = user_id == student_id
+    if not is_instructor and not is_owner:
+        return "You are not an instructor or this specific student!"
+    logs = Log.get_logs_for_user_course(course_id, student_id)
+    assignment_ids = set(log.assignment_id for log in logs)
+    assignments = {aid: Assignment.by_id(aid).encode_json() for aid in assignment_ids}
+    groups = {}
+    for aid in assignment_ids:
+        group = AssignmentGroup.by_assignment(aid)
+        if group:
+            groups[aid] = group[0].encode_json()
+    return ajax_success({
+        'assignments': assignments,
+        'groups': groups,
+        'logs': [l.encode_json() for l in logs]
+    })
+    return "<br>\n".join(make_report([l.encode_json() for l in logs], assignments, groups))
+    #return render_template('courses/student_report.html',
+    #                       submission=submission,
+    #                       assignment=assignment,
+    #                       user=user,
+    #                       course_id=course_id)
+
+
+@courses.route("/list_grading_failures/", methods=["GET", "POST"])
+@courses.route("/list_grading_failures", methods=["GET", "POST"])
+@login_required
+def list_grading_failures():
+    course_id = get_course_id()
+    user, user_id = get_user()
+    # Load Resources
+    course: Course = Course.by_id(course_id)
+    # Check Resource Exists
+    check_resource_exists(course, "Course", course_id)
+    # Check permissions
+    require_course_grader(g.user, course_id)
+    is_grader = g.user.is_grader(int(course_id))
+    # Get failed-to-grade submissions
+    failures = course.get_grading_failures()
+    return render_template("courses/grading_failures.html",
+                           course_id=course_id,
+                           assignments=assignments,
+                           #students=students,
+                           submissions=failures,
+                           criteria='fails',
+                           is_instructor=is_grader)
+
+
+def bulk_assignment_editor_setup(all_submitted=False):
+    course_id = get_course_id()
+    user, user_id = get_user()
+    # Load Resources
+    course: Course = Course.by_id(course_id)
+    # Check Resource Exists
+    check_resource_exists(course, "Course", course_id)
+    grouped_assignments = natsorted(course.get_assignments_grouped() if not all_submitted else course.get_submitted_assignments_grouped(),
+                                    key=lambda r: (r.AssignmentGroup.name if r.AssignmentGroup is not None else "",
+                                                   r.Assignment.name))
+    # assignments = [a.Assignment for a in grouped_assignments]
+    groups = {}
+    for a in grouped_assignments:
+        if a.AssignmentGroup not in groups:
+            groups[a.AssignmentGroup] = []
+        groups[a.AssignmentGroup].append(a.Assignment)
+    # Verify permissions
+    for group, assignments in groups.items():
+        if group:
+            require_course_instructor(g.user, group.course_id, f"This course has assignment group {group.id}")
+        for assignment in assignments:
+            require_course_instructor(g.user, assignment.course_id, f"This course has assignment {assignment.id}")
+    return user, user_id, course, course_id, groups
+
+
+@courses.route('/edit_points', methods=['GET', 'POST'])
+@courses.route('/edit_points/', methods=['GET', 'POST'])
+@login_required
+def edit_points():
+    user, user_id, course, course_id, groups = bulk_assignment_editor_setup()
+    # Perform action
+    if request.method == 'POST':
+        check_course_unlocked(course)
+        modified = []
+        for group, assignments in groups.items():
+            for assignment in assignments:
+                target_field = f'assignment-points-{assignment.id}'
+                points = maybe_int(request.values.get(target_field))
+                if points is not None and assignment.points != points:
+                    assignment.edit(dict(points=points))
+                    modified.append(assignment.name or "(Missing Name)")
+        flash("Modified: "+", ".join(modified))
+        #if ip_ranges is not None:
+        #    for assignment in assignment_group.get_assignments():
+        #        assignment.edit(dict(ip_ranges=ip_ranges))
+        #        assignment.update_setting("passcode", passcode)
+        return redirect(request.url)
+    # Result
+    else:
+        warning = ""
+        return render_template('courses/edit_points.html',
+                               course_id=course_id,
+                               course=course,
+                               groups=groups)
+
+
+ATTRIBUTES_BY_LEVEL = {
+    'group': [('name', str), ('url', str)],
+    'assignment': [('name', str), ('url', str), ('hidden', maybe_bool), ('reviewed', maybe_bool), ('public', maybe_bool),
+                   ('subordinate', maybe_bool)]
+}
+
+def get_updated_settings(group_or_assignment, obj):
+    new_settings = {}
+    if not obj:
+        return new_settings
+    for attribute, converter in ATTRIBUTES_BY_LEVEL[group_or_assignment]:
+        target_field = f'{group_or_assignment}-{attribute}-{obj.id}'
+        if target_field in request.values:
+            original_value = request.values.get(target_field)
+            value = converter(original_value)
+            if original_value is not None and value is not None and getattr(obj, attribute) != value:
+                new_settings[attribute] = value
+    return new_settings
+
+@courses.route('/edit_settings', methods=['GET', 'POST'])
+@courses.route('/edit_settings/', methods=['GET', 'POST'])
+@login_required
+def edit_settings():
+    user, user_id, course, course_id, groups = bulk_assignment_editor_setup()
+    require_course_instructor(user, course_id)
+    # Perform action
+    if request.method == 'POST':
+        check_course_unlocked(course)
+        modified = []
+        for group, assignments in groups.items():
+            for assignment in assignments:
+                new_settings = get_updated_settings('assignment', assignment)
+                if new_settings:
+                    assignment.edit(new_settings)
+                    modified.append(f"Assignment: {assignment.name} ({assignment.id})"
+                                    if assignment.name else f"Unknown Assignment: {assignment.id}")
+            if group:
+                new_settings = get_updated_settings('group', group)
+                if new_settings:
+                    group.edit(new_settings)
+                    modified.append(f"Group: {group.name} ({group.id})"
+                                     if group.name else f"Unknown Group: {group.id}")
+        if modified:
+            flash("Modified: " + ", ".join(modified))
+        else:
+            flash("No assignments modified")
+        # if ip_ranges is not None:
+        #    for assignment in assignment_group.get_assignments():
+        #        assignment.edit(dict(ip_ranges=ip_ranges))
+        #        assignment.update_setting("passcode", passcode)
+        return redirect(request.url)
+    return render_template('courses/edit_settings.html', course_id=course_id, course=course, groups=groups,
+                           group_assignment_map=[[group.id if group else None,
+                                                  [assignment.id for assignment in assignments]]
+                                                 for group, assignments in groups.items()])
+
+
+@courses.route('/edit_textbooks', methods=['GET', 'POST'])
+@courses.route('/edit_textbooks/', methods=['GET', 'POST'])
+@login_required
+def edit_textbooks():
+    user, user_id, course, course_id, groups = bulk_assignment_editor_setup()
+    current_textbooks = course.get_textbooks()
+    all_possible_textbooks = [textbook for textbook in Assignment.get_textbooks(user_id) if textbook not in current_textbooks]
+    # Perform action
+    if request.method == 'POST':
+        check_course_unlocked(course)
+        new_textbook_url = request.values.get('textbook_url', '')
+        action = request.values.get("action", "")
+        if not new_textbook_url or not action:
+            flash(f"Could not take action '{action}' on textbook '{new_textbook_url}'")
+            return redirect(request.url)
+        action_taken = course.do_textbook_action(action, new_textbook_url, user_id)
+        flash(action_taken)
+        return redirect(request.url)
+    # Result
+    else:
+        warning = ""
+        return render_template('courses/edit_textbooks.html',
+                               course_id=course_id,
+                               course=course,
+                               current_textbooks=current_textbooks,
+                               all_possible_textbooks=all_possible_textbooks,
+                               groups=groups)
+
+
+@courses.route('/get_group_submission_links', methods=['GET', 'POST'])
+@courses.route('/get_group_submission_links/', methods=['GET', 'POST'])
+@login_required
+def get_group_submission_links():
+    course_id = get_course_id()
+    user, user_id = get_user()
+    assignment_group_id = maybe_int(request.values.get('assignment_group_id'))
+    # Load Resources
+    course: Course = Course.by_id(course_id)
+    assignment_group: AssignmentGroup = AssignmentGroup.by_id(assignment_group_id)
+    # Check exists
+    check_resource_exists(assignment_group, "Assignment Group", assignment_group_id)
+    # Check grader
+    require_course_grader(user, course_id)
+    # Get users
+    students = course.get_students()
+    return "\n".join([f"{student.name()}\t{student.email}\t" +
+                      url_for('blockpy.view_submissions', _external=True,
+                          assignment_group_id=assignment_group_id, course_id=course_id,
+                          user_id=student.id, _scheme="https")
+                      for student in students])
+
+
+@courses.route('/export/', methods=['GET', 'POST'])
+@courses.route('/export', methods=['GET', 'POST'])
+def export():
+    course_id = get_course_id(True)
+    user, user_id = get_user()
+    if not user.is_instructor(course_id):
+        return abort(400, "Not an instructor in this course.")
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    groups = course.get_assignment_groups()
+    assignment_and_memberships = course.get_assignments()
+    assignments = [a for a, m in assignment_and_memberships]
+    memberships = [m for a, m in assignment_and_memberships]
+    bundle = export_bundle(groups=groups, assignments=assignments,
+                           memberships=memberships)
+    filename = course.get_filename()
+    return Response(json.dumps(bundle, indent=2), mimetype='application/json',
+                    headers={'Content-Disposition': 'attachment;filename={}'.format(filename)})
+
+@courses.route('/pages/<course_id_or_url>/', methods=['GET', "POST"])
+@courses.route('/pages/<course_id_or_url>', methods=["GET", "POST"])
+def pages(course_id_or_url):
+    user, user_id = get_user()
+    # Load Resources
+    course: Course = Course.by_id_or_url(course_id_or_url)
+    # Check Resource Exists
+    check_resource_exists(course, "Course", course_id_or_url)
+    # Get all assignments
+    grouped_assignments = natsorted(course.get_assignments_grouped(),
+                                    key=lambda r: (r.AssignmentGroup.name if r.AssignmentGroup is not None else None,
+                                                   r.Assignment.name))
+    # Group and verify permissions
+    if not user.in_course(course.id) and course.visibility != "public":
+        return redirect(url_for('courses.index'))
+    groups = {}
+    for a in grouped_assignments:
+        if not user.in_course(a.Assignment.course_id) and not a.Assignment.public:
+            continue
+        if a.AssignmentGroup not in groups:
+            groups[a.AssignmentGroup] = []
+        groups[a.AssignmentGroup].append(a.Assignment)
+    # All ready
+    return render_template('courses/textbook.html', course_id=course.id, course=course, groups=groups)
+
+
+@courses.route('/check_similar', methods=['GET', 'POST'])
+@courses.route('/check_similar/', methods=['GET', 'POST'])
+@login_required
+def check_similar():
+    user, user_id, course, course_id, groups = bulk_assignment_editor_setup(all_submitted=True)
+    if request.method == 'POST':
+        assignment_id = maybe_int(request.form.get('assignment_id'))
+        if not assignment_id:
+            flash("No assignment selected")
+            return redirect(request.url)
+        other_student_threshold = maybe_int(request.form.get('other_student_threshold', 95))
+        starter_change_threshold = maybe_int(request.form.get('starter_change_threshold', 95))
+        minimum_file_length = maybe_int(request.form.get('minimum_file_length', 100))
+        exclude_courses = [maybe_int(c) for c in request.form.get('exclude_courses', '').split(',')
+                           if maybe_int(c) is not None]
+        task = tasks.check_similarity_simple(user_id, assignment_id, exclude_courses, course_id,
+                                             other_student_threshold=other_student_threshold,
+                                             starter_change_threshold=starter_change_threshold,
+                                             minimum_file_length=minimum_file_length)
+        flash(f"Started a new similarity check, which may not appear until you reload the page: {task}")
+        return redirect(request.url)
+    existing_reports = Report.by_course(course_id, "check_similarity_simple")
+    return render_template('assignments/similarity.html',
+                           course_id=course_id,
+                           course=course,
+                           groups=groups,
+                           existing_reports=existing_reports)
+
+@courses.route("/fake_dashboard", methods=["GET", "POST"])
+@courses.route("/fake_dashboard/", methods=["GET", "POST"])
+@login_required
+def fake_dashboard():
+    course_id = get_course_id()
+    user, user_id = get_user()
+
+    mode = request.values.get("mode", "json")
+
+    for_student_ids = request.values.get("student_ids", "").split(",")
+    for_student_ids = [maybe_int(i) for i in for_student_ids if maybe_int(i) is not None]
+    if not for_student_ids:
+        for_student_ids = None
+
+    require_course_instructor(user, course_id)
+    course = Course.by_id(course_id)
+
+    suas = course.get_users_submitted_assignments(user_ids=for_student_ids)
+    counts = course.get_submission_counts()
+
+    by_submission = {}
+    found = []
+    for submission, student, assignment in suas:
+        by_submission[submission.id] = {}
+        found.append([submission, assignment, student, by_submission[submission.id]])
+        by_submission[submission.id]["score"] = submission.score
+        by_submission[submission.id]["full_score"] = submission.full_score()
+        by_submission[submission.id]["correct"] = int(submission.correct)
+        by_submission[submission.id]["date_created"] = submission.date_created
+        by_submission[submission.id]["date_modified"] = submission.date_modified
+        by_submission[submission.id]["date_started"] = submission.date_started
+        by_submission[submission.id]["date_submitted"] = submission.date_submitted
+        by_submission[submission.id]["date_graded"] = submission.date_graded
+        by_submission[submission.id]["date_due"] = submission.date_due
+        by_submission[submission.id]["date_locked"] = submission.date_locked
+        by_submission[submission.id]["modifications"] = submission.version
+        by_submission[submission.id]["attempts"] = submission.attempts
+
+    for count_submission_id, metric, value in counts:
+        if count_submission_id not in by_submission:
+            # TODO: Mark missing data
+            continue
+        by_submission[count_submission_id][metric] = value
+
+
+    if mode in ('csv', 'html', 'summary'):
+        all_metrics = set([])
+        pivoted = {}
+        for submission, assignment, user, metrics in found:
+            if user not in pivoted:
+                pivoted[user] = {}
+            if assignment not in pivoted[user]:
+                pivoted[user][assignment] = {}
+            pivoted[user][assignment][submission.id] = metrics
+            all_metrics.update(metrics)
+        all_metrics = sorted(all_metrics)
+        output = io.StringIO()
+        # Handle numbers well for excel
+        writer = csv.writer(output)
+        header = ["User ID", "User Name", "User Email",
+                  "Assignment ID", "Assignment Name", "Assignment URL",
+                  "Submission ID"]
+        full_header = header + SPECIAL_METRICS + all_metrics
+        writer.writerow(full_header)
+        for user, assignments in pivoted.items():
+            for assignment, submission in assignments.items():
+                for submission_id, metrics in submission.items():
+                    values = [metrics.get(metric, "") for metric in all_metrics]
+                    special_metrics = compute_special_metrics(metrics)
+                    writer.writerow([user.id, user.name(), user.email,
+                                     assignment.id, assignment.name, assignment.url,
+                                     submission_id, *special_metrics, *values])
+        if mode == 'csv':
+            output.seek(0)
+            return Response(output.read(), mimetype='text/csv',
+                           headers={'Content-Disposition': f'attachment;filename=fake_dashboard_course_{course_id}.csv'})
+        elif mode == 'html':
+            html_parts = ["<table border='1'><tr>" + "".join(f"<th>{h}</th>" for h in full_header) + "</tr>"]
+            output.seek(0)
+            reader = csv.reader(output)
+            next(reader)  # skip header
+            for row in reader:
+                html_parts.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>")
+            html_parts.append("</table>")
+            return "".join(html_parts)
+
+
+    return ajax_success({
+        "counts": [[a.url, u.id, s] for sub, a, u, s in found]
+    })
+
+SPECIAL_METRICS = ["average_edit_time", "average_intervention_time",
+                   "syntax_error_rate", "runtime_error_rate",
+                   "assertion_success_rate"]
+def compute_special_metrics(metrics):
+    interventions = metrics.get("total_interventions", 1)
+    return [
+        epoch_to_datetime(metrics.get("total_edit_time", 0) / metrics.get("total_edits", 1) if metrics.get("total_edits", 0) > 0 else 0),
+        epoch_to_datetime(metrics.get("total_intervention_time", 0) / interventions if interventions > 0 else 0),
+        metrics.get("feedback_syntax_errors", 0) / interventions if interventions > 0 else 0,
+        metrics.get("feedback_runtime_errors", 0) / interventions if interventions > 0 else 0,
+        metrics.get("feedback_assertion_successes", 0) / metrics.get("feedback_assertion_counts", 1) if metrics.get("feedback_assertion_counts", 0) > 0 else 0,
+    ]
+
+@courses.route('/bulk_groups', methods=['GET', 'POST'])
+@courses.route('/bulk_groups/', methods=['GET', 'POST'])
+@login_required
+def bulk_groups():
+    user, user_id, course, course_id, groups = bulk_assignment_editor_setup(True)
+    # Perform action
+    if request.method == 'POST':
+        # request.values.get
+        # flash("Modified: "+", ".join(modified))
+        #if ip_ranges is not None:
+        #    for assignment in assignment_group.get_assignments():
+        #        assignment.edit(dict(ip_ranges=ip_ranges))
+        #        assignment.update_setting("passcode", passcode)
+        return redirect(request.url)
+    # Result
+    else:
+        return render_template('courses/export_groups.html',
+                               course_id=course_id,
+                               course=course,
+                               groups=groups)
+
+@courses.route('/modify_time', methods=['GET', 'POST'])
+@courses.route('/modify_time/', methods=['GET', 'POST'])
+@login_required
+def modify_time():
+    # TODO: This should work on assignment groups, not individual assignments
+    course_id = get_course_id(False)
+    user, user_id = get_user()
+    student_id = maybe_int(request.values.get("student_id", ""))
+    assignment_group_ids = request.values.get("assignment_group_ids", "")
+    amount = request.values.get("amount", "")
+    # Check permissions
+    require_course_instructor(g.user, course_id)
+    # Load Resources
+    course = Course.by_id(course_id)
+    student = User.by_id(student_id)
+    check_resource_exists(student, "User", student_id)
+    check_resource_exists(course, "Course", course_id)
+    # Load or create the submission for the assignments of this user
+    new_limits = []
+    for assignment_group_id in assignment_group_ids.split(","):
+        assignment_group_id = maybe_int(assignment_group_id)
+        if assignment_group_id is None:
+            continue
+        assignment_group = AssignmentGroup.by_id(assignment_group_id)
+        assignments = assignment_group.get_assignments()
+        for assignment in assignments:
+            submission = assignment.load_or_new_submission(student_id, course_id,
+                                                           assignment_group_id=assignment_group_id)
+            submission.edit(dict(time_limit=amount))
+            make_log_entry(submission.id, submission.version, assignment.id, assignment.version,
+                           course_id, student_id, SubmissionLogEvent.EXTEND_TIME,
+                           message=f"User {user_id} set time limit to `{amount}`")
+            shown_amount = amount if amount else "default"
+            new_limits.append({"assignment": assignment.encode_json(), "time_limit": shown_amount})
+    return ajax_success({'new_limits': new_limits})
+
+@courses.route('/manage_time', methods=['GET', 'POST'])
+@courses.route('/manage_time/', methods=['GET', 'POST'])
+@login_required
+def manage_time():
+    course_id = get_course_id(False)
+    user, user_id = get_user()
+    chosen_assignment_group_ids = request.values.get("assignment_group_ids", "")
+    # Check permissions
+    require_course_instructor(g.user, course_id)
+    # Load Resources
+    course = Course.by_id(course_id)
+    # Get all timed assignments that are available to this user
+    all_timed_assignments = Assignment.get_timed_assignments()
+    all_timed_groups = {}
+    assignment_groups = {}
+    for assignment in all_timed_assignments:
+        for membership in assignment.memberships:
+            if membership.assignment_group:
+                group = membership.assignment_group
+                all_timed_groups[group.id] = group
+                if group.id not in assignment_groups:
+                    assignment_groups[group.id] = []
+                assignment_groups[group.id].append(assignment)
+    # List the exams alphabetically, rather than in whatever order their assignments were found
+    all_timed_groups = {group.id: group for group in
+                        natsorted(all_timed_groups.values(), key=lambda grp: (grp.name or "").lower())}
+
+    all_timed_assignments = { a.id: a for a in all_timed_assignments }
+
+    # Confirm that all assignments in group have time limits
+    missing_assignments = []
+    for group_id, assignments in assignment_groups.items():
+        group = all_timed_groups.get(group_id)
+        actual_assignments = group.get_assignments()
+        assignment_lookup = {a.id: a for a in actual_assignments}
+        actual_ids = {a.id for a in actual_assignments}
+        timed_ids = {a.id for a in assignments}
+        if actual_ids != timed_ids:
+            missing_ids = actual_ids - timed_ids
+            for aid in missing_ids:
+                assignment = assignment_lookup.get(aid)
+                missing_assignments.append(
+                    (group, aid, assignment)
+                )
+
+
+    if chosen_assignment_group_ids:
+        chosen_assignment_group_ids = [int(gid) for gid in chosen_assignment_group_ids.split(",") if maybe_int(gid) is not None]
+    else:
+        chosen_assignment_group_ids = []
+
+    # Get all the users in the course
+    all_users = course.get_users()
+
+    # Get the submissions for the chosen assignments, grouped by user
+    submissions_by_user = {
+        user.id: [sub for sub in [
+            Submission.get_submission(assignment.id, user.id, course_id)
+            for gid in chosen_assignment_group_ids
+            for assignment in assignment_groups.get(gid, [])
+        ] if sub is not None]
+        for role, user in all_users
+    }
+
+    all_users.sort(key=lambda ru: (-sum(len(s.time_limit) if s else 0
+                                       for s in submissions_by_user[ru[1].id]),
+                                   -len(submissions_by_user[ru[1].id]),
+                                   ru[1].name()
+                                   ))
+
+    return render_template("courses/manage_time.html",
+                            course_id=course_id,
+                            course=course,
+                            all_timed_groups=all_timed_groups,
+                            all_timed_assignments=all_timed_assignments,
+                            chosen_assignment_group_ids=chosen_assignment_group_ids,
+                            all_users=all_users,
+                            assignment_groups=assignment_groups,
+                            submissions_by_user=submissions_by_user,
+                            missing_assignments=missing_assignments
+                           )
+
+
+def _parse_limit_minutes(value):
+    """ Parse a time limit string like "60" or "60min" into a number of minutes.
+        Mirrors parseTimeLimit in frontend/components/assignment_interface.ts. """
+    try:
+        return float(value.lower().replace("min", "").strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _format_minutes(minutes):
+    if minutes is None:
+        return None
+    if minutes == int(minutes):
+        minutes = int(minutes)
+    return f"{minutes} minute{'' if minutes == 1 else 's'}"
+
+
+def _describe_exam_time(base_limit, student_limit):
+    """ Produce (standard_time, accommodation) display strings for a student.
+        The accommodation is None when the student has the default time. """
+    base_minutes = _parse_limit_minutes(base_limit)
+    standard = _format_minutes(base_minutes) or str(base_limit)
+    if not student_limit:
+        return standard, None
+    if "min" in student_limit:
+        return standard, _format_minutes(_parse_limit_minutes(student_limit)) or student_limit
+    if "x" in student_limit:
+        try:
+            modifier = float(student_limit.replace("x", "").strip())
+        except ValueError:
+            return standard, student_limit
+        description = f"{student_limit} the standard time"
+        effective = _format_minutes(base_minutes * modifier) if base_minutes is not None else None
+        if effective:
+            description += f" ({effective})"
+        return standard, description
+    return standard, student_limit
+
+
+@courses.route('/exam_time/<course_id>', methods=['GET'])
+@courses.route('/exam_time/<course_id>/', methods=['GET'])
+@login_required
+def exam_time(course_id):
+    course_id = maybe_int(course_id)
+    user, user_id = get_user()
+    course = Course.by_id(course_id)
+    check_resource_exists(course, "Course", course_id)
+    if not user.in_course(course_id):
+        return redirect(url_for('courses.index'))
+    # Find all the timed assignment groups (exams)
+    timed_groups = {}
+    group_assignments = {}
+    timed_assignment_ids = set()
+    for assignment in Assignment.get_timed_assignments():
+        timed_assignment_ids.add(assignment.id)
+        for membership in assignment.memberships:
+            group = membership.assignment_group
+            if group is not None:
+                timed_groups[group.id] = group
+                group_assignments.setdefault(group.id, []).append(assignment)
+    # The exams relevant to this student in this course: groups owned by the course, plus
+    # groups the student has submissions for here (exam groups can be shared across courses)
+    relevant_group_ids = {group_id for group_id, group in timed_groups.items()
+                          if group.course_id == course_id}
+    submissions_by_assignment = {}
+    for submission, _, _ in Submission.by_student(user_id, course_id):
+        if submission.assignment_id in timed_assignment_ids:
+            submissions_by_assignment[submission.assignment_id] = submission
+            if submission.assignment_group_id in timed_groups:
+                relevant_group_ids.add(submission.assignment_group_id)
+    # Build a display row per exam, splitting by assignment if limits differ within a group
+    exams = []
+    relevant_groups = [timed_groups[group_id] for group_id in relevant_group_ids]
+    for group in natsorted(relevant_groups, key=lambda grp: grp.name):
+        details = []
+        for assignment in group_assignments[group.id]:
+            submission = submissions_by_assignment.get(assignment.id)
+            base_limit = assignment.get_setting('time_limit', None)
+            student_limit = (submission.time_limit or "").strip() if submission else ""
+            standard, accommodation = _describe_exam_time(base_limit, student_limit)
+            details.append({'name': f"{group.name}: {assignment.title()}",
+                            'standard': standard,
+                            'accommodation': accommodation,
+                            'date_started': submission.date_started if submission else None})
+        if len({(d['standard'], d['accommodation']) for d in details}) == 1:
+            exams.append({'name': group.name,
+                          'standard': details[0]['standard'],
+                          'accommodation': details[0]['accommodation'],
+                          'date_started': next((d['date_started'] for d in details
+                                                if d['date_started']), None)})
+        else:
+            exams.extend(details)
+    return render_template("courses/exam_time.html",
+                           course_id=course_id,
+                           course=course,
+                           exams=exams)
+

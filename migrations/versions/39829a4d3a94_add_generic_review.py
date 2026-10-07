@@ -1,4 +1,4 @@
-"""empty message
+"""Add generic column to Reviews
 
 Revision ID: 39829a4d3a94
 Revises: 63aeca380751

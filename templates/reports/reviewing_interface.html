@@ -1,0 +1,83 @@
+{% if assignment.reviewed or force_manual_review or has_reviews %}
+    <script type='text/javascript'>
+
+    $(function() {
+        let target = 'reviewable-code-area-{{ submission.id }}';
+
+        let loggedInUser = {{ g.user.encode_json()|tojson }};
+        let submissionId = {{ submission.id|tojson }};
+        let submission = {{ submission.encode_json()|tojson }};
+        let assignment = {{ assignment.encode_json()|tojson }};
+        let reviews = {{ submission.get_reviews()|tojson }};
+        let metaReviews = {{ submission.get_meta_reviews()|tojson }};
+        let tags = {{ tags|tojson }};
+        let isGrader = ko.observable({{ is_grader|tojson }});
+        let previewStudentMode = ko.observable(false);
+        let mainReviewInterface = ko.observable(null);
+        // Improve this check
+        let isLtiActive = {{ (True == (session['is_lti_active'] and g.course and g.course.id == submission.course_id))|tojson }};
+
+        $("#"+target).prepend($(`<submission-review-interface
+            params="server: server,
+            submission: submission,
+            assignment: assignment,
+            author: author,
+            reviews: reviews,
+            reviewInterfaces: reviewInterfaces,
+            genericReviews: genericReviews,
+            tags: tags,
+            isGrader: isGrader,
+            isLtiActive: isLtiActive,
+            canSeeFeedback: canSeeFeedback,
+            canEditFeedback: canEditFeedback,
+            mainReviewInterface: mainReviewInterface"
+        />`));
+
+        const COMMENT_COLUMN = $("<td class='comment-column'></td>");
+        $(`#${target} .highlighttable`).find("td.code").after(COMMENT_COLUMN);
+        $(`#${target} .highlighttable span[id^='code-span-']`).each(function(index, elem) {
+            let parameters = (
+                "location: "+index+
+                ", reviews: reviewInterfaces"+
+                ", isGrader: isGrader"+
+                ", canSeeFeedback: canSeeFeedback"+
+                ", canEditFeedback: canEditFeedback"+
+                ", parent: mainReviewInterface");
+            let button = $("<line-review params='"+parameters+"'></line-review>");
+            button.css({"top": elem.top});
+            COMMENT_COLUMN.append(button);
+        });
+
+        server = new frontend.Server({{ course_id|tojson }}, {
+            submissionIds: [submissionId]
+        }, {
+            users: [loggedInUser],
+            submissions: [submission],
+            reviews: reviews.concat(metaReviews),
+            tags: tags
+        });
+        console.log({server, submission, assignment, reviews, metaReviews, tags});
+        let editModel = {
+            server: server,
+            reviewInterfaces: ko.observableArray([]),
+            submission: server.submissionStore.getInstance(submission.id),
+            assignment: server.assignmentStore.getInstance(assignment.id),
+            author: server.userStore.getInstance(loggedInUser.id),
+            reviews: reviews.map((review) => server.reviewStore.getInstance(review.id)),
+            genericReviews: metaReviews.map((review) => server.reviewStore.getInstance(review.id)),
+            tags: tags,
+            isGrader: isGrader,
+            previewStudentMode: previewStudentMode,
+            isLtiActive: isLtiActive,
+            canSeeFeedback: ko.pureComputed(() => isGrader() || server.submissionStore.getInstance(submission.id).isFullyGraded()),
+            canEditFeedback: ko.pureComputed(() => {
+                return isGrader() && !previewStudentMode();
+            }),
+            mainReviewInterface: mainReviewInterface
+        }
+        ko.cleanNode(document.getElementById(target));
+        ko.applyBindings(editModel, document.getElementById(target));
+    });
+
+    </script>
+{% endif %}

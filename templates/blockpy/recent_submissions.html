@@ -1,0 +1,110 @@
+{% extends 'helpers/layout.html' %}
+
+{% block title %}
+Recent Submissions
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+<script type='text/javascript'>
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+<h1>Recent Submissions</h1>
+
+<label>Student: <span>{{ student.name() }} ({{ student.email }})</span></label>
+<br><br>
+
+<table class="table table-condensed table-hover table-striped table-bordered">
+<caption>Student's recent submissions.</caption>
+<tbody>
+<tr>
+    <th>Course</th>
+    <th>Assignment</th>
+    <th>Correct</th>
+    <th>Submission</th>
+    <th>Grading</th>
+    <th>Actions</th>
+    <th>Touches</th>
+    <th>Last Edited</th>
+</tr>
+
+{% for submission in submissions %}
+<tr
+    class='{%
+        if submission[0].correct or (submission[0].score is defined and submission[0].score|round(1) >= 100) or submission[2].type in ('reading', 'feedback')
+    %}table-success{%
+        elif (submission[0].score is defined and submission[0].score|round(1) > 0)
+    %}table-warning{% endif %}'>
+
+    <td>
+        {{ submission[3].name }}
+    </td>
+
+    <td>
+        <a href="{{  url_for("assignments.load",
+                        assignment_id=submission[2].id, course_id=submission[3].id) }}"
+       target="_blank"><i class="fas fa-edit"></i></a>
+        <a href="{{  url_for("courses.submissions_filter",
+                        criteria="assignment", search_key=submission[2].id, course_id=submission[3].id) }}"
+       ><i class="fas fa-eye"></i></a> {{ submission[2].title() }}
+    </td>
+    <td>
+        {% if submission[0].correct%}Yes{% else %}No{% endif %}
+        {% if submission[0].score is defined %}
+        ({{ submission[0].score|round(1) }}%)
+        {% endif %}
+    </td>
+    <td>
+        {{ submission[0].submission_status }}</td>
+    <td>
+        <span style="cursor: pointer">
+        {% if submission[0].grading_status == "FullyGraded" %}
+            <span class="green-check-mark">&#10004;</span>
+        {% elif submission[0].grading_status == 'Failed' %}
+            <span class="red-x">&#10060;</span>
+        {% elif submission[0].grading_status == 'Pending' %}
+            <span style="color: transparent">.</span>
+        {% endif %}
+        </span>
+        {{ submission[0].grading_status }}
+    </td>
+    <td>{% if submission[0] != None -%}
+    <a href="{{ url_for('blockpy.view_submission', submission_id=submission[0].id, embed=True) }}"
+        target="_blank">View</a>
+    {% if submission[0] != None and submission[0].assignment_group_id != None %}
+        , <a href="{{ url_for('blockpy.view_submissions',
+                        assignment_group_id=submission[0].assignment_group_id,
+                        user_id=submission[1].id,
+                        course_id=submission[3].id,
+                        embed=True) }}"
+        target="_blank">Group</a>
+    {% endif %}
+    {% if is_instructor %},
+    <a href="{{ url_for('blockpy.load_assignment',
+                        assignment_id=submission[2].id,
+                        user_id=submission[1].id,
+                        course_id=submission[3].id,
+                        force_download=True,
+                        embed=True) }}"
+        target="_blank">Download</a>
+    {%- endif %}
+    {%- endif %}</td>
+    <td>{{ submission[0].version or "0"}}</td>
+
+    <td>
+        <span title="{{ submission[0].date_modified }}">
+            {{ submission[0].date_modified|date_description }}
+        </span>
+    </td>
+</tr>
+{% endfor %}
+</table>
+
+
+{% endblock %}

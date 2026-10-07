@@ -1,69 +1,382 @@
+<style>
+    #submission-table thead tr {
+        cursor: pointer;
+    }
+</style>
 {% if is_instructor %}
+    <div class="float-right">
+    <span id="bulk-regrade-status"></span>
+    <div class="btn-group mt-2">
+        <button
+                data-as-human="false"
+                class="bulk-regrade btn btn-outline-secondary"
+                title="Simulate clicking on all of the regrade buttons, forcing the grades to sync with Canvas">
+            Bulk regrade</button>
+        <!-- Dropdown -->
+        <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+            <span class="caret"></span>
+            <span class="sr-only">Toggle Dropdown</span>
+        </button>
+        <div class="dropdown-menu dropdown-menu-right">
+            <button
+                data-as-human="true"
+                class="bulk-regrade btn btn-outline-secondary"
+                title="Simulate clicking on all of the regrade as human buttons, forcing the grades to sync with Canvas. This resubmits the grades with your instructor account, not the autograder. You probably don't want to use this one unless you know what you are doing.">
+            Bulk regrade (as human)</button>
+        </div>
+    </div>
+    </div>
+
 {% if criteria=="assignment" %}
-    <a href="{{ url_for("assignments.export_submissions",
-            assignment_id=search_key,
-            course_id=course_id) }}" target="_blank">Download all submissions</a><br>
+    <div class="btn-group  mt-2">
+        <a href="{{ url_for("assignments.export_submissions",
+                assignment_id=search_key,
+                course_id=course_id) }}" target="_blank"
+            class="btn btn-outline-secondary">Bulk download all submissions for assignment</a>
+        <!-- Dropdown -->
+        <button type="button" class="btn btn-outline-secondary dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+            <span class="caret"></span>
+            <span class="sr-only">Toggle Dropdown</span>
+        </button>
+        <!-- Extended buttons -->
+        <div class="dropdown-menu dropdown-menu-right">
+            <a href="{{ url_for("assignments.export_submissions",
+                assignment_id=search_key,
+                course_id=course_id, history=True) }}"
+                 class="dropdown-item" target="_blank">Download with history</a>
+        </div>
+    </div><br>
+
     <a href="{{  url_for("assignments.load",
                         assignment_id=search_key, course_id=course_id) }}"
-       target="_blank">Open assignment</a>
+       target="_blank" class="btn btn-outline-secondary mt-2 mb-2 ">Open assignment</a><br>
+    <input type="checkbox" name="show-only-learners" id="show-only-learners" />
+    <label for="show-only-learners">Show only learners</label>
 {% else %}
     <a href="{{ url_for("blockpy.load_history",
             user_id=search_key,
-            course_id=course_id) }}" target="_blank">Download all events</a>
+            course_id=course_id) }}" target="_blank"
+     class="btn btn-outline-secondary mt-2 mb-2 ">Bulk download all events</a>
 {% endif %}
 {% endif %}
-<table class="table table-condensed table-hover table-striped table-bordered">
+<table class="table table-condensed table-hover table-striped table-bordered" id="submission-table">
 <caption>Student's submissions for course's assignments.</caption>
+<thead class="thead-dark">
+    <tr>
+        {% if criteria!="assignment" %}<th>Assignment</th>{%endif %}
+        {% if criteria!="student" %}
+            <th>Student</th>
+            <th>Role</th>
+        {%endif %}
+        <th>Correct/Score</th>
+        <th>Submission Status</th>
+        <th>Grading Status</th>
+        <th data-type="number">Edits</th>
+        <th>Created</th>
+        <th>Last Edited</th>
+        <th>Actions</th>
+    </tr>
+</thead>
+
 <tbody>
-<tr>
-    {% if criteria=="student" %}<th>Assignment</th>{%endif %}
-    {% if criteria=="assignment" %}<th>Student</th>{%endif %}
-    <th>Correct</th>
-    <th>Submission</th>
-    <th>Grading</th>
-    <th>Actions</th>
-    <th>Touches</th>
-</tr>
+
 {% for submission in submissions %}
-<tr class='{% if submission[0].correct or (submission[0].score is defined and submission[0].score|round(1) >= 1) %}table-success{% endif %}'>
-    {% if criteria=="student" %}<td>
-        <a href="{{  url_for("assignments.load",
-                        assignment_id=submission[2].id, course_id=course_id) }}"
-       target="_blank"><i class="fas fa-edit"></i></a>
-        {{ submission[2].title() }}
-    </td>{%endif %}
-    {% if criteria=="assignment" %}<td>{{ submission[1].name() }}</td>{%endif %}
+
+     {% if criteria!="assignment" and group_headers and (loop.first or (not loop.first and group_headers[submission[2]] != group_headers[loop.previtem[2]])) %}
+         <tr class="table-secondary table-groups">
+             <td colspan="7"><strong>Group: {{ group_headers[submission[2]].name }}</strong></td>
+            <td>
+                {% if submission[0] != None and submission[0].assignment_group_id != None %}
+                <a href="{{ url_for('blockpy.view_submissions',
+                                    assignment_group_id=submission[0].assignment_group_id,
+                                    user_id=submission[1].id,
+                                    course_id=course_id,
+                                    embed=True) }}"
+                         class="btn btn-primary btn-sm" target="_blank">View Group</a>
+                {% endif %}
+            </td>
+         </tr>
+    {% endif %}
+
+    <!-- Row Color based on Assignment status -->
+    {% set roles_list = submission[1].get_course_roles(course_id)|map(attribute='name')|map('title')|join(', ') if submission[1] != None else "" %}
+    {% set viewer_role = g.user.determine_role([submission[2]], [submission[0]]) if g.user and submission[0] else 'anonymous'%}
+<tr
+    class='{%
+        if submission[0].correct or (submission[0].score is defined and submission[0].score|round(1) >= 100) or submission[2].type in ('reading', 'feedback')
+    %}table-success{%
+        elif (submission[0].score is defined and submission[0].score|round(1) > 0)
+    %}table-warning{% endif %} {{ 'non-learner-row' if 'Learner' not in roles_list else ''  }}'>
+    <!-- Assignment Mode -->
+    {% if criteria!="assignment" %}
     <td>
-        {% if submission[0].correct%}Yes{% else %}No{% endif %}
-        {% if submission[0].score is defined %}
-        ({{ submission[0].score|round(1) }}%)
+        <a href="{{  url_for("courses.submissions_filter",
+                        criteria="assignment", search_key=submission[2].id, course_id=course_id) }}"
+       ><i class="fas fa-eye"></i></a> {{ submission[2].title() }}
+    </td>
+    {%endif %}
+
+    <!-- Student Mode -->
+    {% if criteria!="student" %}
+        <td>
+            <a href="{{  url_for("courses.submissions_filter",
+                        criteria="student", search_key=submission[1].id, course_id=course_id) }}"
+            ><i class="fas fa-eye"></i></a>
+            {{ submission[1].name() }}
+        </td>
+
+        <td>
+            {{ roles_list }}
+        </td>
+    {%endif %}
+
+    <td>
+        {% if not submission[2].hidden or (viewer_role == 'grader' or viewer_role == 'owner') %}
+            {% if submission[0].correct%}Yes{% else %}No{% endif %}
+            {% if submission[0].score is defined %}
+            ({{ submission[0].score|round(1) }}%)
+            {% endif %}
+        {% else %}
+            <i>Hidden</i>
         {% endif %}
     </td>
     <td>
-        {{ submission[0].submission_status }}</td>
+        {{ submission[0].human_submission_status() if submission[0] else "" }}</td>
     <td>
+        <span>
         {% if submission[0].grading_status == "FullyGraded" %}
             <span class="green-check-mark">&#10004;</span>
         {% elif submission[0].grading_status == 'Failed' %}
             <span class="red-x">&#10060;</span>
+        {% elif submission[0].grading_status == 'Pending' %}
+            <span style="color: transparent">*</span>
+        {% else %}
+            <span style="color: transparent">.</span>
         {% endif %}
-        {{ submission[0].grading_status }}
+        </span>
+        {{ submission[0].human_grading_status() if submission[0] else "" }}
     </td>
-    <td>{% if submission[0] != None -%}
-    <a href="{{ url_for('blockpy.view_submission', submission_id=submission[0].id, embed=True) }}"
-        target="_blank">View</a>
-    {% if is_instructor %},
-    <a href="{{ url_for('blockpy.load_assignment',
-                        assignment_id=submission[2].id,
-                        user_id=submission[1].id,
-                        course_id=course_id,
-                        force_download=True,
-                        embed=True) }}"
-        target="_blank">Download</a>
+    <td>
+        <span onclick="estimateDuration(this, {{ submission[0].id }})" style="cursor: pointer">
+        {{ submission[0].version or "0"}}
+        </span>
+    </td>
+
+    <td>
+        <span title="{{ submission[0].date_created }}">
+            <local-time utc="{{ submission[0].date_created }}Z"></local-time>
+        </span>
+    </td>
+    <td>
+        <span title="{{ submission[0].date_modified }}">
+            <local-time utc="{{ submission[0].date_modified }}Z"></local-time>
+        </span>
+    </td>
+
+    <td>
+        {% if submission[0] != None -%}
+
+        <div class="btn-group">
+            <a href="{{ url_for('blockpy.view_submission', submission_id=submission[0].id, embed=True) }}"
+                target="_blank"  class="btn btn-primary btn-sm"
+            >View</a>
+            <!-- Dropdown -->
+            <button type="button" class="btn btn-primary dropdown-toggle btn-sm" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="caret"></span>
+                <span class="sr-only">Toggle Dropdown</span>
+            </button>
+            <!-- Extended buttons -->
+            {% if not submission[2].hidden or (viewer_role == 'grader' or viewer_role == 'owner') %}
+            <div class="dropdown-menu dropdown-menu-right">
+                {% if submission[0] != None and submission[0].assignment_group_id != None %}
+                    <a href="{{ url_for('blockpy.view_submissions',
+                                    assignment_group_id=submission[0].assignment_group_id,
+                                    user_id=submission[1].id,
+                                    course_id=course_id,
+                                    embed=True) }}"
+                         class="dropdown-item" target="_blank">View Group</a>
+                {% endif %}
+                {% if is_instructor %}
+                    <!---------------------------------------------------------------------->
+                    <a href="{{ url_for('blockpy.load_assignment',
+                                        assignment_id=submission[2].id,
+                                        user_id=submission[1].id,
+                                        course_id=course_id,
+                                        force_download=True,
+                                        embed=True) }}"
+                        target="_blank" class="dropdown-item">Download Submission</a>
+                    <!---------------------------------------------------------------------->
+                    <a href="{{ url_for('blockpy.load_assignment',
+                                        assignment_id=submission[2].id,
+                                        user_id=submission[1].id,
+                                        course_id=course_id,
+                                        force_download=True,
+                                        with_history=True,
+                                        embed=True) }}"
+                        target="_blank" class="dropdown-item">Download Submission+History</a>
+                    <!---------------------------------------------------------------------->
+                    <a href="{{ url_for('blockpy.browse_history', assignment_id=submission[0].assignment_id,
+        user_id=submission[0].user_id, course_id=course_id) }}" target="_blank" class="dropdown-item">History Log</a>
+                    <!---------------------------------------------------------------------->
+                    <a href="{{ url_for('assignments.transfer_course', submission_id=submission[0].id) }}"
+                        target="_blank" class="dropdown-item"
+                       title="Launches a new window to help you transfer this submission to another course, if the student transfers"
+                    >Copy to Course</a>
+                    <!---------------------------------------------------------------------->
+                    {% for as_human in [False, True] %}
+                    <button class="dropdown-item re-autograde-btn" type="button"
+                            onclick="regrade(this, {{ submission[0].id }}, {{ (not as_human)|tojson }})"
+                            data-submission-id="{{ submission[0].id }}"
+                            data-assignment-name="{{ submission[2].title() }}"
+                            data-user-name="{{ submission[1].name() }}"
+                            data-as-human="{{ as_human|tojson }}"
+                            style="cursor: pointer"
+                            {% if as_human %}
+                            title="Force a regrade of the submission, but do so as a human instead of the autograder."
+                            {% else %}
+                            title="Force a regrade of the submission, but do so as the autograder. Forces resync with canvas."
+                            {% endif %}
+                    >{% if submission[0].grading_status == "FullyGraded" %}
+                        <span class="green-check-mark">&#10004;</span>
+                    {% elif submission[0].grading_status == 'Failed' %}
+                        <span class="red-x">&#10060;</span>
+                    {% elif submission[0].grading_status == 'Pending' %}
+                        <span style="color: transparent"></span>
+                    {% else %}
+                        <span style="color: transparent"></span>
+                    {% endif %}
+                        {% if as_human %}
+                            Regrade as human
+                        {% else %}
+                            Regrade
+                        {% endif %}
+                    </button>
+                    {% endfor %}
+                    <!---------------------------------------------------------------------->
+                {%- endif %}
+
+
+            </div>
+            {% else %}
+                <div class="dropdown-menu dropdown-menu-right"></div>
+            {% endif %}
+        </div>
     {%- endif %}
-    {%- endif %}</td>
-    <td>{{ submission[0].version or "0"}}</td>
+    </td>
 </tr>
 {% endfor %}
 </tbody>
 </table>
+
+<script>
+    $(function() {
+        $("#show-only-learners").change(function() {
+            if (this.checked) {
+                $(".non-learner-row").hide();
+            } else {
+                $(".non-learner-row").show();
+            }
+        }).change();
+
+        let WAIT = 200;
+        $(".bulk-regrade").click(function() {
+            const asHuman = $(this).data("as-human");
+            // Only select buttons if the data attribute as-human the same as asHuman
+            const regradeButtons = document.querySelectorAll(`button.re-autograde-btn[data-as-human="${asHuman}"]`);
+            $(".overlay").show();
+            let finished = 0;
+            $(`#bulk-regrade-status`).text(`Bulk regrading... (${finished}/${regradeButtons.length})`);
+            regradeButtons.forEach(function (button, index) {
+                setTimeout(() => {
+                    button.click();
+                    finished += 1;
+                    if (finished === regradeButtons.length) {
+                        $(".overlay").hide();
+                        $("#bulk-regrade-status").text(`Bulk regrading complete (${finished}/${regradeButtons.length})`);
+                    } else {
+                        $("#bulk-regrade-status").text(`Bulk regrading... (${finished}/${regradeButtons.length})`);
+                    }
+                }, WAIT * index);
+            });
+        });
+    });
+
+    const table = document.getElementById('submission-table');
+
+    const headers = table.querySelectorAll('th');
+    [].forEach.call(headers, (header, index) => {
+        header.addEventListener('click', ()=> {
+            sortColumn(index);
+        })
+    });
+
+    // Query all rows
+    const tableBody = table.querySelector('tbody');
+    let rows = tableBody.querySelectorAll('tr');
+
+    const directions = Array.from(headers).map(() => "");
+
+    const sortColumn = function (index) {
+        // Remove old rows
+        tableBody.querySelectorAll(".table-groups").forEach(e => e.remove());
+
+        // Clone the rows
+        rows = tableBody.querySelectorAll('tr');
+        const newRows = Array.from(rows);
+
+        // Get the current direction
+        const direction = directions[index] || 'asc';
+        // A factor based on the direction
+        const multiplier = (direction === 'asc') ? 1 : -1;
+
+        // Sort rows by the content of cells
+        newRows.sort((rowA, rowB) => {
+            // Get the content of cells
+            const cellA = rowA.querySelectorAll('td')[index].innerText;
+            const cellB = rowB.querySelectorAll('td')[index].innerText;
+
+            // Transform the content of cells
+            const a = transform(index, cellA);
+            const b = transform(index, cellB);
+
+            return multiplier * (a > b ? 1 : (a < b) ? -1 : 0);
+        });
+
+        // Remove old rows
+        [].forEach.call(rows, function (row) {
+            tableBody.removeChild(row);
+        });
+
+        // Append new row
+        newRows.forEach(function (newRow) {
+            tableBody.appendChild(newRow);
+        });
+
+        // Reverse the direction
+        directions[index] = direction === 'asc' ? 'desc' : 'asc';
+
+        const lastSorted = table.querySelector("#last-sorted");
+        if (lastSorted) {
+            lastSorted.remove();
+        }
+        const newIcon = document.createElement("i");
+        newIcon.classList = "ml-2 fas fa-arrow-" + (direction === 'asc' ? 'up' : 'down');
+        newIcon.id = "last-sorted";
+        headers[index].appendChild(newIcon);
+    };
+
+    // Transform the content of given cell in given column
+    const transform = function (index, content) {
+        // Get the data type of column
+        const type = headers[index].getAttribute('data-type');
+        switch (type) {
+            case 'number':
+                return parseFloat(content);
+            case 'string':
+            default:
+                return content;
+        }
+    };
+
+</script>

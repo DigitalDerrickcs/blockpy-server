@@ -1,0 +1,252 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% macro describe_submission(submission, assignment) %}
+    {% if submission %}
+        <a href="{{ url_for('blockpy.view_submission', submission_id=submission.id) }}"
+            target="_blank">View</a> ({{ submission.version }})<br>
+        {% if submission.url %}
+            URL: <code>{{ submission.url }}</code><br>
+        {% endif %}
+        {% if submission.endpoint %}
+            Endpoint: <code>{{ submission.endpoint }}</code><br>
+        {% endif %}
+        <table class="table-light table-bordered table-condensed table-hover table-striped">
+            <tr>
+                <td>Score: <code>{{ submission.score }}</code></td>
+                <td>Submission Status: <code>{{ submission.submission_status }}</code></td>
+                <td>Due Date: <code>{{ submission.date_due }}</code></td>
+            </tr>
+            <tr>
+                <td>Correct: <code>{{ submission.correct }}</code></td>
+                <td>Grading Status: <code>{{ submission.grading_status }}</code></td>
+                <td>Lock Date: <code>{{ submission.date_locked }}</code></td>
+            </tr>
+        </table>
+        {% if submission.code %}
+        <pre class="bg-light border rounded" style="max-width: 40em; overflow: auto;"><code>
+            {{- submission.code|truncate(255) -}}
+        </code></pre>
+        {% else %}
+            No code.
+        {% endif %}
+        {% if submission.extra_files %}
+            Extra Files:
+            <pre style="max-width: 40em; overflow: auto;"><code>{{- submission.extra_files|truncate(255) -}}</code></pre>
+        {% endif %}
+    {% else %}
+        No existing submission.
+    {% endif %}
+{% endmacro %}
+
+{% block title %}
+Copy Submission to Course
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+function toggle(source) {
+    let checkboxes = document.getElementsByClassName('transfer-submission-check');
+    for(let i=0, n=checkboxes.length; i<n; i++) {
+        checkboxes[i].checked = source.checked;
+    }
+}
+
+function getCurrentValuesAsUrl() {
+    const baseUrl = new URL({{ url_for('assignments.bulk_transfer_course')|tojson }},
+        window.location.origin);
+    const sourceCourse = $("#source-courses").val();
+    const destinationCourse = $("#destination-courses").val();
+    const selectedGroup = $("#search-groups").val();
+    const sortCoursesBy = $("#sort-courses-by").val();
+    const params = {};
+    if (sourceCourse) {
+        params['source_course_id'] = sourceCourse;
+    }
+    if (destinationCourse) {
+        params['destination_course_id'] = destinationCourse;
+    }
+    if (selectedGroup) {
+        params['assignment_group_id'] = selectedGroup;
+    }
+    if (sortCoursesBy) {
+        params['sort_courses_by'] = sortCoursesBy;
+    }
+    baseUrl.search = new URLSearchParams(params).toString();
+    return baseUrl.toString();
+}
+
+$(function() {
+    $(".selection-menu").on("change", function(i, v) {
+        if (i.target.value !== "") {
+            window.location.href = getCurrentValuesAsUrl();
+        }
+    });
+});
+</script>
+{% endblock %}
+
+{% block body %}
+
+    <h1>Copy Submission to Course</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert alert-warning">
+            {% for message in messages %}
+                {{ message|safe }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This form will help you transfer multiple submissions from one course to another.
+        Note that this does NOT change the original submissions - they will not be modified or deleted.
+        Instead, this will either create or update a submission in the new course for the same
+        students and assignments.
+        The history does not get transferred, just the current state of the students' code and score.
+        This can overwrite any existing submission that the student already had in that new target course.
+        Also note that this will NOT automatically update the grade in the LMS; you will either need
+        to submit that grade again, or more likely go edit the grade again.
+    </p>
+
+    <h3>Available Courses and Submissions</h3>
+
+    <form action="" method="post">
+
+    <div class="row">
+        <div class="col-md-8">
+
+            <label>Original Course:
+            <select id="source-courses" class="selection-menu form-control">
+                <option value=""></option>
+                {% for course in available_courses %}
+                <option value="{{ course.id }}"
+                {%- if course.id == source_course_id %} selected {%- endif %} >{{ course.name }} ({{ course.id }})</option>
+                {% endfor %}
+            </select>
+            </label>
+            <br><br>
+
+            <label>Assignment Groups:
+            <select id='search-groups' class="selection-menu form-control">
+            <option value=''></option>
+            {% for group in groups %}
+                {% if group != None %}
+                    <option value="{{ group.id }}"
+                    {%- if group.id == assignment_group_id %} selected
+                    {%- endif %} >{{ group.name }}</option>
+                {% endif %}
+            {% endfor %}
+            </select>
+            </label>
+            <br><br>
+
+            <label>Destination Course:
+            <select id="destination-courses" class="selection-menu form-control">
+                <option value=""></option>
+                {% for course in available_courses %}
+                <option value="{{ course.id }}"
+                {%- if course.id == destination_course_id %} selected {%- endif %} >{{ course.name }} ({{ course.id }})</option>
+                {% endfor %}
+            </select>
+            </label>
+            <br><br>
+        </div>
+
+        <div class="col-md-4">
+            <label>Sort Courses by:
+            <select id="sort-courses-by" class="selection-menu form-control">
+                <option value="name" {%- if sort_courses_by == "name" %} selected {%- endif %}>Name</option>
+                <option value="date_created" {%- if sort_courses_by == "date_created" %} selected {%- endif %}>Date Created</option>
+            </select>
+            </label>
+            <br><br>
+        </div>
+
+        <div class="form-check form-check-inline mb-3 ml-3">
+            <input name="overwrite-endpoints" id="overwrite-endpoints"
+                   class="form-check-input" type="checkbox" value="true">
+            <input name="overwrite-endpoints" type="hidden" value="false">
+            <label class="form-check-label" for="overwrite-endpoints">Overwrite endpoints</label><br>
+            <small>Whether to override endpoints even if they already exist, which is the connection between the submission and Canvas. Usually, you would not want to overwrite existing endpoints. If there is no existing endpoint, then the old submissions' endpoint will be transferred either way.
+            This is useful if the submission got embedded into the Canvas course with the wrong BlockPy Course ID, but the proper Canvas instance (and you're worried that students created new submissions).</small>
+        </div>
+    </div>
+
+    {% if potential_transfers %}
+
+    <h3>Available Submissions</h3>
+    <p>
+        This table shows all the submissions in the original course that are eligible to be transferred to the new course.
+        You can select which submissions you want to transfer, and then click the button at the bottom to transfer them.
+    </p>
+
+    <div class="form-check form-check-inline">
+        <input name="transfer-all" id="transfer-all"
+               class="form-check-input" type="checkbox" value="true"
+               onClick="toggle(this)">
+        <input name="transfer-all" type="hidden" value="false">
+        <label class="form-check-label" for="transfer-all">Select/Unselect All</label>
+    </div>
+
+
+    <table class="table table-bordered table-condensed table-hover table-striped">
+        <thead>
+            <tr>
+                <th>Student</th>
+                <th>Assignment</th>
+                <th>Old Submission</th>
+                <th>New Submission</th>
+                <th>Transfer?</th>
+            </tr>
+        </thead>
+
+        {% for student, assignment, old_submission, new_submission in potential_transfers %}
+            <tr class="{{ 'table-warning' if new_submission else '' }}">
+                <td>
+                    {{ student.name() }}<br>
+                    <code>{{ student.email }}</code>
+                    <code>{{ student.id }}</code>
+                </td>
+                <td>
+                    {{ assignment.name }}<br>
+                    <code>{{ assignment.url }}</code><br>
+                    <code>{{ assignment.id }}</code>
+                </td>
+                <td>
+                    {{ describe_submission(old_submission, assignment) }}
+                </td>
+                <td>
+                    {{ describe_submission(new_submission, assignment) }}
+                </td>
+                <td>
+                    <div class="form-check form-check-inline col-sm-1">
+                        <input name="transfer-submission-{{ old_submission.id }}" id="transfer-submission-{{ old_submission.id }}"
+                               class="form-check-input transfer-submission-check" type="checkbox" value="true">
+                        <input name="transfer-submission-{{ old_submission.id }}" type="hidden" value="false">
+                        <label class="form-check-label" for="transfer-submission-{{ old_submission.id }}">Overwrite?</label>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+    </table>
+
+    <button type="submit" class="btn btn-primary" id="do-transfer" name="do-transfer" value="do-transfer">Transfer Submissions</button>
+
+        {% else %}
+
+        <p>There are no submissions to transfer yet.</p>
+
+    {% endif %}
+
+    </form>
+
+
+{% endblock %}

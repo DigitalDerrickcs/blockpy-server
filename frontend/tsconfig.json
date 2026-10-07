@@ -18,11 +18,14 @@
         //"experimentalDecorators": true,
         "baseUrl": ".",
         "paths": {
+            "*": ["custom_types/*"]
         },
-        "types": ["node", "jquery", "bootstrap", "knockout", "jasmine", "CodeMirror", "select2"]
+        "types": ["node", "jquery", "bootstrap", "knockout", "jasmine", "CodeMirror", "select2"],
+      "allowSyntheticDefaultImports": true
     },
     "include": [
-        "components"
+        "components",
+        "custom_types"
     ],
     "exclude": [
         "node_modules"

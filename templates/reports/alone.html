@@ -8,16 +8,64 @@
 {% block extrahead %}
     <script>
     URLS_UPDATE_SUBMISSION = "{{ url_for('blockpy.update_submission') }}";
+    let assignments = [], submissions = [];
+
+    let loggedInUser = {{ viewer.encode_json()|tojson }};
+    let userIds = {{  request.values.get('user_ids')|tojson }} || frontend.getLocalStorage("BLOCKPY_SERVER_USERIDS", "");
+    let assignmentIds = {{  request.values.get('assignment_ids')|tojson }} || frontend.getLocalStorage("BLOCKPY_SERVER_ASSIGNMENTIDS", "first");
+
+    $(function() {
+        server = new frontend.Server({{ course_id|tojson }}, {
+        }, {
+            users: [loggedInUser]
+        });
+        mainModel = {
+            pageCourseId: {{ course_id|tojson }},
+            userIds: userIds,
+            assignmentIds: assignmentIds,
+            server: server,
+            user: loggedInUser,
+            submissions: []
+        }
+        ko.applyBindings(mainModel);
+    });
     </script>
-    <script src="{{  url_for('static', filename='libs/blockpy_server/blockpy_server.js') }}"></script>
 {% endblock %}
 
 {% block body %}
 
-{% if assignment.type == "blockpy" %}
+{% if assignment.type.lower() == "blockpy" %}
     {% include "reports/blockpy.html" with context %}
-{% elif assignment.type == "maze" %}
+{% elif assignment.type.lower() == "maze" %}
     {% include "reports/maze.html" with context %}
+{% elif assignment.type.lower() == "reading" %}
+    {% include "reports/reading.html" with context %}
+{% elif assignment.type.lower() == "quiz" %}
+    {% include "reports/quiz.html" with context %}
+{% elif assignment.type.lower() == "java" %}
+    {% include "reports/java.html" with context %}
+{% elif assignment.type.lower() == "textbook" %}
+    {% include "reports/textbook.html" with context %}
+{% elif assignment.type.lower() == "typescript" %}
+    {% include "reports/typescript.html" with context %}
+{% elif assignment.type.lower() == "explain" %}
+    {% include "reports/explains.html" with context %}
+{% elif assignment.type.lower() == "feedback" %}
+    {% include "reports/feedback.html" with context %}
+{% else %}
+    Unknown assignment type
 {% endif %}
+
+    {% if is_grader %}
+
+        <div class="m-3">
+            <a href="{{ url_for('courses.submissions_filter', course_id=course_id) }}" class="btn btn-secondary">
+                Back to Submissions
+            </a>
+            <a href="{{ url_for('blockpy.load', course_id=course_id, assignment_id=assignment.id) }}" class="btn btn-secondary">
+                View Assignment
+            </a>
+        </div>
+    {% endif %}
 
 {% endblock %}

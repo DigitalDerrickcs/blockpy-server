@@ -1,0 +1,61 @@
+{% import 'helpers/report_tools.html' as report_tools %}
+
+<div xml:lang="en">
+    <h2 id='{{ assignment.slug() }}'>{{ assignment.name }}</h2>
+
+    {% set hiding = assignment.hidden or assignment.get_setting('hide_submission', False) %}
+
+{% if is_grader or not hiding %}
+    {% if hiding and is_grader %}<small>Hidden assignment! Instructions, submitted code, grade, and other details will be hidden from students</small>{% endif %}
+<div class="module mb-2 m-2">
+ <a class="read-more collapsed" data-toggle="collapse" href="#collapse-instructions-{{ assignment.slug() }}" role="button"></a>
+  <div class="collapse" id="collapse-instructions-{{ assignment.slug() }}" aria-expanded="false">
+    {{ assignment.instructions|extract_kettle_instructions(submission, assignment)|safe }}
+  </div>
+</div>
+{% endif  %}
+<hr>
+
+{{ report_tools.render_submission_details(submission, is_grader, hiding) }}
+
+{%  include "reports//reviewing_interface.html" with context %}
+
+    
+    {% if is_grader %}
+    <div>Full Submission: <a href="{{ url_for('blockpy.load_assignment',
+                            assignment_id=submission.assignment_id,
+                            user_id=submission.user_id,
+                            course_id=submission.course_id,
+                            force_download=True,
+                            embed=True) }}">download</a></div>
+    {% endif %}
+    {% if is_grader or not hiding %}
+    <div class="col-xl-6 col-md-12 mb-2">
+    <script>
+            submissions.push({{ submission.encode_json()|tojson }});
+            assignments.push({{ assignment.encode_json()|tojson }});
+        </script>
+    <submission-watcher params="server: server, courseId: pageCourseId,
+        user: user,
+        userIds: {{ submission.user_id|tojson }},
+        assignmentIds: {{ submission.assignment_id|tojson }},
+        defaultWatchMode: 1"></submission-watcher>
+    <!--<div>History: <a href="{{ url_for('blockpy.browse_history', assignment_id=submission.assignment_id,
+        user_id=submission.user_id, course_id=submission.course_id) }}">view</a></div>-->
+    {% endif %}
+
+    {% if (is_grader or not hiding) and submission.code %}
+    <div id="reviewable-code-area-{{ submission.id }}">Submitted code:<br>
+        {{ submission.code|highlight_typescript_code|safe }}
+        {% if submission.extra_files %}
+            {% for filename, contents in (submission.extra_files|json_load).items() %}
+                <strong>{{ filename }}</strong>
+                {{ contents|highlight_python_code|safe }}
+            {% endfor %}
+        {% endif %}
+    </div>
+
+
+
+    {% endif %}
+</div>

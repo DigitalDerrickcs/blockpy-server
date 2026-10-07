@@ -1,0 +1,51 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Edit Assignment Points
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+    <h1>Edit Assignment Points</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    <p>
+        This page allows you to edit the points for each assignment.
+        You should only edit this page if you know what you are doing and trying
+        to adjust the point values of assignments.
+    </p>
+
+
+    <form action="" method=post>
+    <h3>Ungrouped Assignments</h3>
+    {% for group, assignments in groups.items() %}
+        <h3>{{ group.name }}</h3>
+        {% for assignment in assignments %}
+        <div class="form-group row">
+            <label for="assignment-points-{{ assignment.id }}" class="col-sm-2 col-form-label">
+                {{ assignment.name }}
+            </label>
+            <div class="col-sm-10">
+                <input type=number name="assignment-points-{{ assignment.id }}"
+                       id="assignment-points-{{ assignment.id }}" class="form-control"
+                   value="{{ assignment.points or (0 if assignment.type in ('reading', 'feedback') else 1) }}">
+            </div>
+        </div>
+        {% endfor %}
+    {% endfor %}
+        <input type="submit" value="Update" class="btn btn-success">
+    </form>
+
+
+{% endblock %}

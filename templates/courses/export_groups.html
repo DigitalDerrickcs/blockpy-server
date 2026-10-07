@@ -1,0 +1,50 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Bulk Group Submissions
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+    <h1>Bulk Group Submissions</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    <p>
+        This page allows you to download and re-upload grades for assignment groups.
+    </p>
+
+
+    {% for group, assignments in groups.items() %}
+        <div class="form-group row">
+            <div class="col-sm-2 col-form-label">
+                {{ group.name if group.name else 'Ungrouped Assignments' }}
+            </div>
+            <div class="col-sm-6">
+                <a href="{{ url_for('assignment_group.export_submissions', course_id=course_id, assignment_group_id=group.id) }}"
+                   class="btn btn-primary" target="_blank">Download Submissions</a>
+                <a href="{{ url_for('assignment_group.export_submissions', course_id=course_id, assignment_group_id=group.id, history=True) }}"
+                   class="btn btn-primary" target="_blank">Download with History</a>
+            </div>
+            <div class="col-sm-4">
+                <ol>
+                {% for assignment in assignments %}
+                    <li>{{ assignment.name }}</li>
+                {% endfor %}
+                </ol>
+            </div>
+        </div>
+    {% endfor %}
+
+
+{% endblock %}

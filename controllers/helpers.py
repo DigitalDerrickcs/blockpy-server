@@ -1,125 +1,43 @@
+"""
+Helper functions for Flask controllers.
+
+This includes a bunch of security/permission checks. Previously, this would
+return 200 responses with success=False, but we will eventually use proper HTTP status codes
+and Flask's abort() function to handle errors. Unfortunately, the frontend
+is not yet configured to use this new approach. So we're in a transition period.
+
+Each of these functions can receive a keyword argument `as_html` which,
+if True, will return HTML error messages instead of JSON. This is useful for
+endpoints that are expected to return HTML pages rather than JSON responses.
+"""
+
 # Built-in imports
-import logging
-import re
-import os
-from urllib.parse import quote as url_quote, urlencode
+from urllib.parse import quote as url_quote
+import json
 from functools import wraps
 
-from models.log import Log
-from models.submission import Submission
-
-from html.parser import HTMLParser
-
-from urllib.parse import unquote_plus, urlparse, parse_qsl, quote_plus, urlunparse, urlencode
-
-# Pygments, for reporting nicely formatted Python snippets
-from pygments import highlight
-from pygments.lexers import PythonLexer
-from pygments.formatters import HtmlFormatter
+from natsort import natsorted
 
 # Flask imports
 from flask import g, request, redirect, url_for, make_response, current_app
 from flask import flash, session, jsonify, abort
-import flask_security
 
-from controllers.pylti.flask import LTI, LTIException
-
-from main import app
-
-from models.user import User
+from common.dates import from_canvas_isotime
+from common.maybe import maybe_bool, maybe_int
 from models.course import Course
 from models.assignment import Assignment
 from models.assignment_group import AssignmentGroup
-
-
-def lti(request='any', *lti_args, **lti_kwargs):
-    """
-    LTI decorator
-
-    :param: request - Request type from
-        :py:attr:`pylti.common.LTI_REQUEST_TYPE`. (default: any)
-    :return: wrapper
-    """
-
-    def lti_outer_wrapper(function):
-        @wraps(function)
-        def lti_wrapper(*args, **kwargs):
-            """
-            Pass LTI reference to function or return error.
-            """
-            try:
-                the_lti = LTI(lti_args, lti_kwargs)
-                the_lti.verify()
-                kwargs['lti'] = the_lti
-                old_user = g.user
-                g.user = User.from_lti("canvas",
-                                       session["pylti_user_id"],
-                                       session.get("lis_person_contact_email_primary", ""),
-                                       session.get("lis_person_name_given", "Canvas"),
-                                       session.get("lis_person_name_family", "User"))
-                g.roles = session["roles"].split(",") if "roles" in session else []
-                g.course = Course.from_lti("canvas",
-                                           session["context_id"],
-                                           session.get("context_title", ""),
-                                           g.user.id,
-                                           session.get("lis_outcome_service_url", ""))
-                session['lti_course'] = g.course.id
-                session['is_lti_active'] = True
-                g.user.update_roles(g.roles, g.course.id)
-                if old_user != g.user:
-                    flask_security.utils.logout_user()
-                    flask_security.utils.login_user(g.user, remember=True)
-                elif not old_user:
-                    flask_security.utils.login_user(g.user, remember=True)
-            except LTIException as lti_exception:
-                session['is_lti_active'] = False
-                kwargs['lti'] = None
-                kwargs['lti_exception'] = dict()
-                kwargs['lti_exception']['exception'] = lti_exception
-                kwargs['lti_exception']['kwargs'] = kwargs
-                kwargs['lti_exception']['args'] = args
-                flash("LTI Error: " + str(lti_exception) + ".\nTry reloading!")
-            return function(*args, **kwargs)
-
-        return lti_wrapper
-
-    lti_kwargs['request'] = request
-    lti_kwargs['app'] = app
-    return lti_outer_wrapper
-
-
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if g.user is None:
-            return redirect(url_for('security.login', next=request.url))
-        if not g.user.is_admin():
-            flash("This portion of the site is only for administrators.")
-            return redirect(url_for('courses.index'))
-        return f(*args, **kwargs)
-
-    return decorated_function
-
-
-def instructor_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if g.user is None:
-            return redirect(url_for('security.login', next=request.url))
-        if not g.user.is_instructor():
-            flash("This portion of the site is only for instructors.")
-            return redirect(url_for('courses.index'))
-        return f(*args, **kwargs)
-
-    return decorated_function
+from models.enums import SubmissionLogEvent
+from models.log_tables import SubmissionLog as Log
+from models.log_tables import RoleLog, CourseLog, ErrorLog, AccessLog, AssignmentLog, SubmissionLog
 
 
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if g.user is None:
-            if app.config['PREFERRED_LOGIN']:
-                return redirect(app.config['PREFERRED_LOGIN'])
+            if current_app.config['PREFERRED_LOGIN']:
+                return redirect(current_app.config['PREFERRED_LOGIN'])
             else:
                 return redirect(url_for('security.login', next=request.url))
         return f(*args, **kwargs)
@@ -127,19 +45,59 @@ def login_required(f):
     return decorated_function
 
 
-def require_course_instructor(user, course_id):
+def abort_with_failure(code, message, as_html=False):
+    if as_html:
+        abort(code, message)
+    else:
+        abort(make_response(jsonify(success=False, message=message), code))
+
+
+def require_course_instructor(user, course_id, addendum="", as_html=False, allow_fork=False):
     if not user.is_instructor(course_id):
-        message = 'You are not an instructor (course ID {}).'.format(course_id)
+        if allow_fork and user.is_instructor(allow_fork):
+            message = ('You are not an instructor (course ID {}), but you can fork this question for your own course'
+                       ' (course ID {}).').format(course_id, allow_fork)
+            abort(make_response(jsonify(success=False, message=message, forkable=True), 200))
+        if user.anonymous:
+            abort_with_failure(200, f'You are not logged in. Please log in as an instructor (course ID {course_id}). {addendum}', as_html)
+        else:
+            abort_with_failure(200, f'You are not an instructor (course ID {course_id}). {addendum}', as_html)
+    return True
+
+
+def require_course_grader(user, course_id, allow_fork=False):
+    if not user.is_grader(course_id):
+        if allow_fork and user.is_grader(allow_fork):
+            message = ('You are not a grader (course ID {}), but you can fork this question for your own course'
+                       ' (course ID {}).').format(course_id, allow_fork)
+            abort(make_response(jsonify(success=False, message=message, forkable=True), 200))
+            return False
+        message = 'You are not a grader (course ID {}).'.format(course_id)
+        abort(make_response(jsonify(success=False, message=message, forkable=False), 200))
+        return False
+    return True
+
+def require_course_adopter(user, course_id):
+    if user.is_grader(course_id):
+        return True
+    if not user.is_adopter(course_id):
+        message = 'You are not an adopter (course ID {}).'.format(course_id)
         abort(make_response(jsonify(success=False, message=message), 200))
         return False
     return True
 
 
-def require_course_grader(user, course_id):
-    if not user.is_grader(course_id):
-        message = 'You are not a grader (course ID {}).'.format(course_id)
+def require_admin(user):
+    if not user.is_admin():
+        message = "You are not an administrator."
         abort(make_response(jsonify(success=False, message=message), 200))
-        return False
+    return True
+
+
+def check_course_unlocked(course):
+    if course.locked:
+        message = "This course is locked. Please unlock the course before editing."
+        abort(make_response(jsonify(success=False, message=message), 200))
     return True
 
 
@@ -188,37 +146,35 @@ def parse_lookup_code():
     except ValueError:
         message = "I didn't understand the lookup code: " + lookup
         abort(make_response(jsonify(success=False, message=message), 400))
-        return None
     return assignment_group_id
 
 
-def maybe_int(value):
-    try:
-        return int(value)
-    except ValueError:
+SINGLE_ARG_HACK_PARAMS = (('embed', maybe_bool),
+                          ('grade_mode', str),
+                          ('assignment_group_id', maybe_int),
+                          ('course_id', maybe_int),
+                          ('user_id', maybe_int))
+
+
+def handle_single_arg_hack():
+    """
+    Horrifying solution to Canvas not correctly handling param bodies in oauth requests.
+
+    Real solution is to use this: https://canvas.instructure.com/doc/api/file.tools_xml.html#do-not-move-lti-query-params-to-post-body
+
+    :return:
+    """
+    single_arg_hack = request.values.get('single_arg_hack', None)
+    if single_arg_hack is None:
         return None
-    except TypeError:
-        return None
+    single_arg_hack = single_arg_hack.split("-")
+    for key, value in zip(SINGLE_ARG_HACK_PARAMS, single_arg_hack):
+        yield value
 
 
-def maybe_float(value):
-    try:
-        return float(value)
-    except ValueError:
-        return None
-    except TypeError:
-        return None
-
-
-def maybe_bool(value):
-    if value is None:
-        return False
-    elif value.lower() == "true":
-        return True
-    return False
-
-
-def parse_assignment_load():
+def parse_assignment_load(assignment_id_or_url=None):
+    # Single Arg Hack
+    #handle_single_arg_hack()
     # Lookup Code
     assignment_group_id = parse_lookup_code()
     # Assignment Group ID
@@ -228,10 +184,10 @@ def parse_assignment_load():
     if assignment_group_id is None:
         assignment_group_id = AssignmentGroup.id_by_url(request.args.get('assignment_group_url'))
     # Assignment ID
-    current_assignment_id = maybe_int(request.args.get('assignment_id'))
+    current_assignment_id = maybe_int(request.args.get('assignment_id', assignment_id_or_url))
     # Exact "url" code for assignment
     if current_assignment_id is None:
-        current_assignment_id = Assignment.id_by_url(request.args.get('assignment_url'))
+        current_assignment_id = Assignment.id_by_url(request.args.get('assignment_url', assignment_id_or_url))
     # User
     user = g.get('user', None)
     user_id = user.id if user else None
@@ -241,6 +197,8 @@ def parse_assignment_load():
         course_id = int(g.course.id) if 'course' in g and g.course else None
     # LTI submission URL
     new_submission_url = request.form.get('lis_result_sourcedid', None)
+    new_due_date = from_canvas_isotime(request.form.get('custom_canvas_assignment_dueat', None))
+    new_lock_date = from_canvas_isotime(request.form.get('custom_canvas_assignment_lockat', None))
     # Embedded?
     embed = request.values.get('embed', 'false').lower() == 'true'
     # Get group
@@ -254,29 +212,58 @@ def parse_assignment_load():
             assignments = []
     else:
         assignments = assignment_group.get_assignments()
+    # No existing assignment, let's get the default
+    if not assignments:
+        # And no known course? Better get the default course!
+        if course_id is None:
+            course = Course.get_default()
+            course_id = course.id
+        else:
+            course = g.course
+        default_assignment = course.get_default_assignment()
+        if default_assignment:
+            assignments = [default_assignment]
+        else:
+            assignments = []
     # Potentially adjust assignment_id
-    if current_assignment_id is None and assignments:
+    if current_assignment_id is None and assignments and assignments[0]:
         current_assignment_id = assignments[0].id
     # Get submissions
+    if user and user.anonymous and course_id is None:
+        course_id = Course.get_default().id
     if user_id is None or course_id is None:
         submissions = []
+        submission_assignment_map = {}
     else:
-        submissions = [assignment.load_or_new_submission(user_id, course_id, new_submission_url, assignment_group_id)
+        submissions = [assignment.load_or_new_submission(user_id, course_id, new_submission_url, assignment_group_id,
+                                                         new_due_date, new_lock_date)
                        for assignment in assignments]
+        submission_assignment_map = {submission.assignment_id: submission for submission in submissions}
     # Determine the users' role in relation to this information
     role = user.determine_role(assignments, submissions) if user else "anonymous"
     if role in ("student", "anonymous"):
         # Check for any IP locked assignments
         for assignment in assignments:
             if not assignment.is_allowed(request.remote_addr):
-                return abort(403, "You cannot access this assignment from your current location: "+request.remote_addr)
+                if submissions:
+                    submission = submission_assignment_map.get(assignment.id, None)
+                    if submission:
+                        make_log_entry(submission.id, submission.version, assignment.id, assignment.version,
+                                       course_id, user_id, SubmissionLogEvent.ERROR,
+                                       message=str(request.remote_addr))
+                return abort(403,
+                             "You cannot access this assignment from your current location: " + request.remote_addr)
     # Check passcode
     passcode_protected = False
     for assignment in assignments:
         if assignment.has_passcode() and not passcode_protected:
             passcode_protected = True
+    # Check for studio flag
+    use_studio = maybe_bool(request.values.get('use_studio', None))
     # Combine the submissions and assignments
     group = list(zip(assignments, submissions))
+    # Get session start time
+    session_start_time = None if not submissions else submissions[0].get_session_start_time()
     # Okay we've got everything
     return dict(group=group,
                 assignment_group=assignment_group,
@@ -289,28 +276,34 @@ def parse_assignment_load():
                 role=role,
                 course_id=course_id,
                 embed=embed,
-                passcode_protected=passcode_protected)
+                session_start_time=session_start_time,
+                passcode_protected=passcode_protected,
+                use_studio=use_studio)
 
 
-class MLStripper(HTMLParser):
-    def __init__(self):
-        self.reset()
-        self.fed = []
-
-    def handle_data(self, d):
-        self.fed.append(d)
-
-    def get_data(self):
-        return ''.join(self.fed)
-
-
-def strip_tags(html):
-    s = MLStripper()
-    s.feed(html)
-    return s.get_data()
+def check_permissions(viewer, submission, assignment, ip_address):
+    """
+    :param viewer:
+    :param submission:
+    :param assignment:
+    :return:
+    """
+    role = viewer.determine_role([assignment], [submission]) if viewer else "anonymous"
+    print(role, viewer, submission, assignment, ip_address)
+    if role in ('owner', 'grader'):
+        return True
+    if role in ("student", "anonymous"):
+        # Check for any IP locked assignments
+        if not assignment.is_allowed(ip_address):
+            make_log_entry(submission.id, submission.version, assignment.id, assignment.version,
+                           submission.course_id, submission.user_id, SubmissionLogEvent.ERROR,
+                           message=json.dumps({"ip_address": ip_address, "viewer_id": viewer.id if viewer else None}))
+            return False
+    return submission.user_id == viewer.id if viewer else False
 
 
 def get_lti_property(property_name, default_value=None):
+    # TODO: Deprecate this!
     if property_name in request.form:
         return request.form[property_name]
     elif property_name in session:
@@ -320,10 +313,12 @@ def get_lti_property(property_name, default_value=None):
     raise KeyError('Property {0} not found in form or session.'.format(property_name))
 
 
-def get_course_id(okay_if_failure=False):
+def get_course_id(okay_if_failure=False, course_id=None):
+    if course_id is not None:
+        return course_id
     course_id = request.values.get('course_id')
     if course_id is None:
-        if 'course' in g:
+        if 'course' in g and g.course:
             return g.course.id
         if not okay_if_failure:
             ajax_failure("No course_id given and not logged into a course.")
@@ -332,39 +327,6 @@ def get_course_id(okay_if_failure=False):
         if not okay_if_failure:
             ajax_failure("Course ID was not an integer")
     return course_id
-
-
-class UnknownUser:
-    def __bool__(self):
-        return False
-
-    def __init__(self):
-        self.id = None
-
-    def is_grader(self, *args):
-        return False
-
-    def is_instructor(self, *args):
-        return False
-
-    def in_course(self, course_id):
-        return False
-
-    def encode_json(self):
-        return {"id": None}
-
-
-UNKNOWN_USER = UnknownUser()
-
-
-def get_user():
-    """
-
-    :return: models.user.User
-    """
-    if 'user' in g and g.user:
-        return g.user, g.user.id
-    return UNKNOWN_USER, None
 
 
 def get_assignment_id(f):
@@ -386,41 +348,12 @@ def get_assignment_id(f):
     return decorated_function
 
 
-def highlight_python_code(code, linenos=True, prestyles=''):
-    formatter = HtmlFormatter(linenos=linenos, noclasses=True,
-                              lineanchors="code-lineno",
-                              linespans="code-span",
-                              prestyles=prestyles,
-                              # style='colorful'
-                              )
-    return highlight(code, PythonLexer(), formatter)
-
-
-def normalize_url(url):
-    url = re.sub(r'http://', r'', url)
-    url = re.sub(r'https://', r'', url)
-    url = re.sub(r'file://', r'', url)
-    parts = urlparse(url, scheme='')
-    _query = urlencode(sorted(set(parse_qsl(parts.query))))
-    _path = unquote_plus(parts.path)
-    parts = parts._replace(query=_query, path=_path, scheme='', fragment='')
-    url = "/".join((parts.netloc, _path, _query))
-    return quote_plus(url)
-
-
-def ensure_dirs(path):
-    try:
-        os.makedirs(path)
-    except OSError as e:
-        if not os.path.isdir(path):
-            app.logger.warning(e.args + (path,))
-
-
 def get_select_menu_link(id, title, is_embedded, is_group):
     launch_type = 'iframe' if is_embedded else 'lti_launch_url'
     base_url = url_quote(url_for('assignments.load',
                                  assignment_group_id=id,
                                  _external=True,
+                                 _scheme="https",
                                  embed=is_embedded))
     return '&'.join([base_url,
                      "return_type=" + launch_type,
@@ -433,16 +366,74 @@ def get_select_menu_link(id, title, is_embedded, is_group):
 def ajax_failure(message, error_code=200):
     return abort(make_response(jsonify(success=False, message=message, ip=request.remote_addr), error_code))
 
-
 def ajax_success(original_data):
     original_data['ip'] = request.remote_addr
     original_data['success'] = True
     return jsonify(original_data)
 
 
-def make_log_entry(assignment_id, assignment_version, course_id, user_id,
-                   event_type, file_path='', category='', label='', message='', timestamp=None, timezone=None):
+def make_log_entry(submission_id, submission_version, assignment_id, assignment_version, course_id, user_id,
+                   event_type, file_path='', category='', label='', message='', timestamp=None, timezone=None, extended=False):
     timestamp = request.values.get('timestamp') if timestamp is None else timestamp
     timezone = request.values.get('timezone') if timezone is None else timezone
-    return Log.new(assignment_id, assignment_version, course_id, user_id,
-                   event_type, file_path, category, label, message, timestamp, timezone)
+    return Log.new(submission_id, submission_version, assignment_id, assignment_version, course_id, user_id,
+                   event_type, file_path, category, label, message, timestamp, timezone, extended)
+
+
+def get_assignments_in_groups(course):
+    grouped_assignments = natsorted(course.get_submitted_assignments_grouped(),
+                                    key=lambda r: (
+                                        r.AssignmentGroup.name if r.AssignmentGroup is not None else "~~~~~~~~",
+                                        r.Assignment.title()))
+    assignments_by_group = {}
+    group_headers = {}
+    groups = []
+    for row in grouped_assignments:
+        group_name = row.AssignmentGroup.name if row.AssignmentGroup is not None else None
+        assignments_by_group.setdefault(group_name, []).append(row.Assignment)
+        group_headers[row.Assignment] = row.AssignmentGroup
+        if row.AssignmentGroup not in groups:
+            groups.append(row.AssignmentGroup)
+    # Horrifying hack to move Ungrouped elements to end
+    assignments_by_group[None] = assignments_by_group.pop(None, None)
+    return grouped_assignments, assignments_by_group, group_headers, groups
+
+
+def admin_required(f):
+    """
+    Deprecated.
+
+    :param f:
+    :return:
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if g.user is None:
+            return redirect(url_for('security.login', next=request.url))
+        if not g.user.is_admin():
+            flash("This portion of the site is only for administrators.")
+            return redirect(url_for('courses.index'))
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def instructor_required(f):
+    """
+    Deprecated
+
+    :param f:
+    :return:
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if g.user is None:
+            return redirect(url_for('security.login', next=request.url))
+        if not g.user.is_instructor():
+            flash("This portion of the site is only for instructors.")
+            return redirect(url_for('courses.index'))
+        return f(*args, **kwargs)
+
+    return decorated_function

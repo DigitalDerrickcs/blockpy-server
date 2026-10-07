@@ -1,0 +1,353 @@
+body {
+    font-size: 14px;
+}
+
+a {
+    text-decoration: underline;
+}
+
+a[role="button"], button a, a.btn, .btn a, .nav a, .navbar a,
+.dropdown-menu a {
+    text-decoration: none;
+}
+
+.text-monospace {
+    font-family: monospace;
+}
+
+.dropdown-menu, .form-control {
+    font-size: 14px;
+}
+
+button, input.btn, a.btn {
+    font-size: 14px;
+}
+
+.navbar-inverse .navbar-nav > li > a {
+    color: white;
+}
+
+.navbar-inverse a.navbar-brand {
+    color: white;
+}
+
+.navbar-inverse .navbar-link.btn.btn-outline-secondary {
+    color: black;
+}
+
+.nav-item.active {
+    background-color: black;
+}
+
+.bg-dark {
+    background-color: #222 !important;
+}
+
+.nav a.dropdown-toggle:focus {
+    outline: 1px solid rgb(77, 144, 254);
+}
+
+table caption {
+    color: #333;
+}
+
+.label-default {
+    background-color: #444;
+}
+
+.btn-outline-secondary {
+    color: black;
+    background-color: white;
+}
+
+.btn-outline-secondary.disabled, .btn-outline-secondary:disabled {
+    background-color: #DDD;
+    color: black;
+}
+
+.btn-sm {
+    font-size: 12px;
+}
+
+button.btn-lg, input.btn.btn-lg, a.btn.btn-lg {
+    font-size: 16px;
+}
+
+form label {
+    font-weight: bold;
+}
+
+/* Highlight JS */
+td.hljs-ln-numbers {
+    text-align: center;
+    color: black;
+    background: lightgrey;
+    border-right: 1px solid #999;
+    vertical-align: top;
+    padding-left: 5px;
+
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+td.hljs-ln-code {
+    padding-left: 10px;
+}
+
+pre.python-code-block code {
+    overflow: auto;
+}
+
+code.hljs {
+    background: white;
+    border: 1px solid lightgrey;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 0px;
+}
+
+table.hljs-ln tr {
+    border-bottom: 1px dashed #F0F0F0;
+}
+
+/* Spinner */
+.spinner-loader {
+    border: 4px solid #f3f3f3; /* Light grey */
+    border-top: 4px solid #3498db; /* Blue */
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/** Model Selector **/
+.model-selector.badge {
+    font-size: 12px;
+}
+
+.highlighttable pre {
+    font-size: 15px;
+}
+
+.highlighttable tr:first-child {
+    vertical-align: top;
+}
+
+td.code div.highlight {
+    max-width: 600px;
+    overflow-x: auto;
+}
+
+td.comment-column {
+    vertical-align: top;
+}
+
+span.line-review-quick-button {
+    padding: 0;
+    margin: 0;
+    line-height: 125%;
+    font-size: 15px;
+    display: block;
+    color: #EEE;
+    position: relative;
+}
+
+span.line-review-quick-button:hover {
+    color: darkgray;
+}
+
+span.line-review-quick-button:active {
+    color: black;
+}
+
+.total-row {
+    border-top: 2px solid darkgray;
+}
+
+.individual-review-show-box {
+    padding: 7px;
+    border-bottom: 1px solid lightgray;
+}
+
+.draft-comment {
+    font-style: italic;
+}
+
+div.line-review-box {
+    position: relative;
+}
+
+table.review-report td:last-child {
+    text-align: right;
+}
+
+.clickable {
+    cursor: pointer;
+}
+
+.draft-review {
+    border: 1px solid lightgray;
+    padding: 4px;
+    background-color: #EEE;
+}
+
+.static-popover {
+    position: absolute;
+    min-width: 500px;
+}
+
+.static-popover.expanded {
+
+}
+
+.static-popover.collapsed {
+    min-width: 300px;
+}
+
+.static-popover .arrow {
+    top: -1px;
+}
+
+.static-popover.inactive {
+    border: 0;
+}
+
+.popover-header-sm {
+    padding: 1px .5rem;
+}
+
+.popover-control {
+    padding-top: .25rem;
+}
+
+div.overlay {
+    height: 100%;
+    width: 100%;
+    position: fixed;
+    z-index: 1000000;
+    left: 0;
+    top: 0;
+    background-color: rgba(16, 16, 16, 0.5);
+    overflow-x: hidden; /* Disable horizontal scroll */
+    transition: 0.5s;
+}
+
+div.linenodiv {
+    line-height: normal;
+}
+
+reader .reader-editor .CodeMirror {
+    min-height: 500px;
+}
+
+.mdq {
+    padding: 2px;
+    border: 1px solid lightgray;
+    color: #555;
+}
+
+.mdq-True {
+    background-color: #d1e7dd;
+}
+
+.mdq-True::before {
+    content: "✔️";
+}
+
+.mdq-False {
+    background-color: #f8d7da;
+}
+
+.mdq-False::before {
+    content: "❌ ";
+}
+
+ul.maq {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+li.maq {
+    position: relative;
+    padding-left: 1.5em;
+}
+
+li.maq:before {
+    content: "✔️";
+    position: absolute;
+    left: 0;
+    width: 1em;
+    height: 1em;
+}
+
+li.maq-True:before {
+    content: "✔️";
+}
+
+li.maq-False::before {
+    content: "❌ ";
+}
+
+.instructor-only-tools {
+    background-color: #fcf8e3;
+    border: 1px solid #faebcc;
+}
+
+.module {
+    position: relative;
+    border: 1px solid lightgrey;
+    padding: 1em;
+}
+
+.module .collapse,
+.module .collapsing {
+    height: 3rem;
+}
+
+.module .collapse {
+    display: block;
+    overflow: hidden;
+}
+
+.module .collapse.show {
+    height: auto;
+}
+
+.module .collapse:not(.show) {
+    display: block; /* By default the bootstrap collapse has a display: none */
+    overflow: hidden;
+}
+
+.read-more {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1;
+    /* 60% is where it should start the transition from transparent to white, increase it if you want to show more of your text */
+    background-image: linear-gradient(to bottom, transparent 60%, white);
+
+    /* The opacity and transition is just to smooth out the effect */
+    opacity: 1;
+    transition: all .3s linear;
+}
+
+.read-more:not(.collapsed) {
+    opacity: 0;
+    /* If you want to make the clickable area disapear once it is open, change the visibility to hidden */
+    /* visibility: hidden; */
+}

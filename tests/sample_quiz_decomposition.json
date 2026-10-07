@@ -1,0 +1,19 @@
+{
+    "feedbackType": "immediate",
+    "questions": {
+        "FlowSubstitution": {
+            "type": "matching_question",
+            "points": 2.0,
+            "body": "Given the program below:\n\n```python\n\ndef x(a:int) ->int:\n    return 6+a\ndef y(a:int) -> int:\n    return a*2\ndef z(a:int) -> int:\n    return a-1\nprint(x(y(z(3))))\n\n```\n\nMatch each blank to the value that will be substituted as the last line is\nexecuted:"
+        },
+        "FlowPrint": {
+            "type": "true_false_question",
+            "points": 1.0,
+            "body": "The `print` function is necessary to call a function."
+        }
+    }
+}
+
+{
+    "studentAnswers": {"FlowPrint": true}
+}

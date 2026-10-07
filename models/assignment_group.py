@@ -1,27 +1,46 @@
+from typing import List, Optional, TYPE_CHECKING
+
 from flask import url_for
-from sqlalchemy import Column, String, Integer, ForeignKey, func
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Column, String, Integer, ForeignKey, func, Enum, UniqueConstraint, Index
 from natsort import natsorted
 from werkzeug.utils import secure_filename
 
-from models import models
-from models.models import Base, datetime_to_string, string_to_datetime, db
-from typing import List
+import models
+from common.maybe import maybe_int
+from common.text import make_flavored_uuid_generator
+from models.enums import AssignmentGroupCategory
+from models.generics.models import db, ma
+from models.generics.base import EnhancedBase, Base
+from common.dates import datetime_to_string
+from common.databases import make_copy, get_enum_values
+
+if TYPE_CHECKING:
+    from models import *
 
 
-class AssignmentGroup(Base):
+class AssignmentGroup(EnhancedBase):
     __tablename__ = 'assignment_group'
-    name = Column(String(255), default="Untitled")
-    url = Column(String(255), nullable=True)
-    forked_id = Column(Integer(), ForeignKey('assignment_group.id'), nullable=True)
-    forked_version = Column(Integer(), nullable=True)
-    owner_id = Column(Integer(), ForeignKey('user.id'))
-    course_id = Column(Integer(), ForeignKey('course.id'))
-    position = Column(Integer(), default=0)
-    version = Column(Integer(), default=0)
+    name: Mapped[str] = mapped_column(String(255), default="Untitled")
+    url: Mapped[Optional[str]] = mapped_column(String(255), default=make_flavored_uuid_generator("group"),
+                                               nullable=True)
+    forked_id: Mapped[Optional[int]] = mapped_column(Integer(), ForeignKey('assignment_group.id'),
+                                                     nullable=True)
+    category: Mapped[AssignmentGroupCategory] = mapped_column(Enum(AssignmentGroupCategory, values_callable=get_enum_values), default=AssignmentGroupCategory.NONE)
+    forked_version: Mapped[Optional[int]] = mapped_column(Integer(), nullable=True)
+    owner_id: Mapped[int] = mapped_column(Integer(), ForeignKey('user.id'))
+    course_id: Mapped[int] = mapped_column(Integer(), ForeignKey('course.id'))
+    position: Mapped[int] = mapped_column(Integer(), default=0)
+    version: Mapped[int] = mapped_column(Integer(), default=0)
 
-    forked = db.relationship("AssignmentGroup")
-    owner = db.relationship("User")
-    course = db.relationship("Course")
+    forked: Mapped["AssignmentGroup"] = db.relationship("AssignmentGroup", remote_side="AssignmentGroup.id")
+    owner: Mapped["User"] = db.relationship(back_populates="assignment_groups")
+    course: Mapped["Course"] = db.relationship(back_populates="assignment_groups")
+    memberships: Mapped[list["AssignmentGroupMembership"]] = db.relationship(back_populates="assignment_group")
+    submissions: Mapped[list["Submission"]] = db.relationship(back_populates="assignment_group")
+
+    __table_args__ = (Index("assignment_group_url_index", "url"),
+                      Index('assignment_group_course_index', "course_id"))
 
     def __str__(self):
         return '<Group {} in {} ({})>'.format(self.name, self.course_id, self.url)
@@ -42,14 +61,14 @@ class AssignmentGroup(Base):
                 'date_modified': datetime_to_string(self.date_modified),
                 'date_created': datetime_to_string(self.date_created)}
 
-    SCHEMA_V1_IGNORE_COLUMNS = Base.SCHEMA_V1_IGNORE_COLUMNS + ('owner_id__email',)
-    SCHEMA_V2_IGNORE_COLUMNS = Base.SCHEMA_V2_IGNORE_COLUMNS + ('owner_id__email',)
+    SCHEMA_V1_IGNORE_COLUMNS = EnhancedBase.SCHEMA_V1_IGNORE_COLUMNS + ('owner_id__email',)
+    SCHEMA_V2_IGNORE_COLUMNS = EnhancedBase.SCHEMA_V2_IGNORE_COLUMNS + ('owner_id__email',)
 
     @staticmethod
     def new(owner_id, course_id, name="Untitled Group", url=None):
         last = (db.session.query(func.max(AssignmentGroup.position).label("last_position"))
-                .filter_by(course_id=course_id).one()).last_position
-        assignment_group = AssignmentGroup(owner_id=owner_id, course_id=course_id,
+                .filter_by(course_id=maybe_int(course_id)).one()).last_position
+        assignment_group = AssignmentGroup(owner_id=owner_id, course_id=maybe_int(course_id),
                                            name=name, url=url,
                                            position=last + 1 if last else 1)
         db.session.add(assignment_group)
@@ -70,9 +89,30 @@ class AssignmentGroup(Base):
         models.AssignmentGroupMembership.query.filter_by(assignment_group_id=assignment_group_id).delete()
         db.session.commit()
 
+    def fork(self, new_owner_id: int, new_course_id: int, with_assignments: bool=True,
+             new_url = None, new_name= None):
+        group = AssignmentGroup(name=new_name if new_name is not None else self.name,
+                                url=new_url if new_url is not None else make_copy(self.url),
+                                forked_id=self.id,
+                                forked_version=self.version,
+                                owner_id=new_owner_id,
+                                course_id=maybe_int(new_course_id),
+                                position=self.position,
+                                version=0)
+        # TODO: Copy tags, sample_submissions, submissions
+        db.session.add(group)
+        db.session.commit()
+        assignments = []
+        if with_assignments:
+            for assignment in self.get_assignments():
+                new_assignment = assignment.fork(new_owner_id, maybe_int(new_course_id))
+                models.AssignmentGroupMembership.move_assignment(new_assignment.id, group.id)
+                assignments.append(new_assignment)
+        return group, assignments
+
     @staticmethod
     def is_in_course(assignment_group_id, course_id):
-        return AssignmentGroup.query.get(assignment_group_id).course_id == course_id
+        return AssignmentGroup.query.get(assignment_group_id).course_id == maybe_int(course_id)
 
     @staticmethod
     def id_by_url(assignment_group_url):
@@ -92,9 +132,13 @@ class AssignmentGroup(Base):
 
     @staticmethod
     def by_course(course_id):
-        return (AssignmentGroup.query.filter_by(course_id=course_id)
+        return (AssignmentGroup.query.filter_by(course_id=maybe_int(course_id))
                 .order_by(AssignmentGroup.name)
                 .all())
+
+    @staticmethod
+    def check_if_url_exists(url: str) -> bool:
+        return AssignmentGroup.query.filter_by(url=url).first() is not None
 
     @staticmethod
     def by_assignment(assignment_id):
@@ -108,7 +152,7 @@ class AssignmentGroup(Base):
     @staticmethod
     def get_ungrouped_assignments(course_id):
         return (models.Assignment.query
-                .filter_by(course_id=course_id)
+                .filter_by(course_id=maybe_int(course_id))
                 .outerjoin(models.AssignmentGroupMembership)
                 .filter(models.AssignmentGroupMembership.assignment_id == None)
                 .all())
@@ -132,14 +176,27 @@ class AssignmentGroup(Base):
                                  models.AssignmentGroupMembership.id)
                        .all())
 
-    def get_select_url(self, menu):
+    def get_select_url(self, menu = 'embed'):
         # TODO: Refactor web logic outside of model?
         if self.url:
-            return url_for('assignments.load', assignment_group_url=self.url, _external=True, embed=menu == 'embed')
-        return url_for('assignments.load', assignment_group_id=self.id, _external=True, embed=menu == 'embed')
+            return url_for('assignments.load', assignment_group_url=self.url, _external=True, _scheme="https",embed=menu == 'embed')
+        return url_for('assignments.load', assignment_group_id=self.id, _external=True, _scheme="https",embed=menu == 'embed')
 
-    def get_filename(self):
+    def get_filename(self, extension=".json"):
         if self.url:
-            return secure_filename(self.url) + ".json"
+            return secure_filename(self.url) + extension
         else:
-            return secure_filename(self.name) + ".json"
+            return secure_filename(self.name) + extension
+
+    def find_all_linked_resources(self) -> dict[str, list[Base]]:
+        # Get any assignments that are forked from this one
+        forked = AssignmentGroup.query.filter_by(forked_id=self.id).all()
+        resources = {
+            "AssignmentGroup": forked,
+            "Submission": self.submissions,
+            "Memberships": self.memberships
+        }
+        return resources
+
+    def get_existing_forks(self):
+        return AssignmentGroup.query.filter_by(forked_id=self.id).all()

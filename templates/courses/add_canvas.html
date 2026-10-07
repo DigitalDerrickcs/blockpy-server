@@ -22,8 +22,6 @@ Courses: Add Canvas Course
 <div>
 To add our tools to your Canvas course, you'll need to do the following.
 
-{% set pylti_config = config['PYLTI_CONFIG']['consumers'].items()|list %}
-
 <ol>
     <li>Create and visit your course on Canvas.</li>
     <li>Go to "Settings" on the left sidebar menu.</li>
@@ -32,8 +30,8 @@ To add our tools to your Canvas course, you'll need to do the following.
     <li>Click "Add App".</li>
     <li>Choose "Paste XML".</li>
     <li>For the name, enter <code>BlockPy Version {{ config['SITE_VERSION'] }}</code></li>
-    <li>For the Consumer Key, enter <code>{{ pylti_config[0][0] }}</code></li>
-    <li>For the Shared Secret, enter <code>{{ pylti_config[0][1]['secret'] }}</code></li>
+    <li>For the Consumer Key, enter <code>{{ config['CONSUMER_KEY'] }}</code></li>
+    <li>For the Shared Secret, enter <code>{{ config['CONSUMER_KEY_SECRET'] }}</code></li>
     <li>For the XML Configuration, copy the XML on the following page: <a href="{{ url_for('courses.config') }}">LTI XML Configuration</a></li>
     <li>To add new BlockPy/Maze assignments, choose the "External Tool" type and select "BlockPy Version {{ config['SITE_VERSION'] }}" from the list.</li>
 </ol>

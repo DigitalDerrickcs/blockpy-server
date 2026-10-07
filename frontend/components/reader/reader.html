@@ -1,0 +1,78 @@
+<!-- Popout button -->
+    <a href="" class="btn btn-sm btn-outline-secondary float-right m-3" target="_blank"
+        data-bind="attr: {href: assignment().editUrl()+'&embed=true'}, visible: allowPopout()">
+        <span class="fas fa-external-link-alt" aria-hidden="true"></span>
+        Popout
+    </a>
+    <!-- Download button -->
+    <a href="" class="btn btn-sm btn-outline-secondary float-right m-3" target="_blank"
+        data-bind="attr: {href: slides()}, visible: slides().length">
+        <span class="fas fa-download" aria-hidden="true"></span>
+        Download
+    </a>
+    <!-- Body -->
+    <div  style="background: #FBFAF7" class="pt-4">
+        <h3 data-bind="text: header(), hidden: !header().length" class="p-1"></h3>
+        <div data-bind="text: summary(), hidden: !summary().length" class="p-1"></div>
+        <!-- ko if: youtube().length && !video().length -->
+        <div style="float: right" class="btn-group" role="group" data-bind="if: Object.keys(youtubeOptions()).length > 1">
+            <button id="blockpy-reader-video-voice-choice" type="button" class="btn btn-outline-secondary dropdown-toggle"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+            </button>
+            <div class="dropdown-menu" aria-labelledby="blockpy-reader-video-voice-choice"
+                data-bind="foreach: Object.keys(youtubeOptions())"">
+                <a href="" data-bind="text : $data,
+                                      click: ()=>$parent.setVoice($data, $parent.youtubeOptions()[$data]),
+                                      css: {active: $parent.youtubeOptions()[$data] === $parent.youtube()}"
+                    class="dropdown-item"></a>
+            </div>
+        </div>
+        <!-- /ko -->
+        <!-- ko if: video().length -->
+        <div style="float: right" class="btn-group" role="group" data-bind="if: Object.keys(videoOptions()).length > 1">
+            <button id="blockpy-reader-video-voice-choice" type="button" class="btn btn-outline-secondary dropdown-toggle"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+            </button>
+            <div class="dropdown-menu" aria-labelledby="blockpy-reader-video-voice-choice"
+                data-bind="foreach: Object.keys(videoOptions())"">
+                <a href="" data-bind="text : $data,
+                                      click: ()=>$parent.setVoiceVideo($data, $parent.videoOptions()[$data]),
+                                      css: {active: $parent.videoOptions()[$data] === $parent.video()}"
+                    class="dropdown-item"></a>
+            </div>
+        </div>
+        <video data-bind="if: video().length" controls width="640" height="480"
+            style="display: block; margin-left: auto; margin-right: auto;"
+            crossorigin="anonymous" preload="metadata" class="reader-video-display">
+            <source data-bind="attr: { src: video() + '#t=1' }" type="video/mp4" >
+            <track data-bind="attr: { src: video().slice(0, -3) + 'vtt'}"
+                default kind="captions" srclang="en" label="English">
+        </video>
+        <!-- /ko -->
+        <iframe style="width: 640px; height: 480px; margin-left: 10%"
+            width="300" height="150" allowfullscreen="allowfullscreen"
+            webkitallowfullscreen="webkitallowfullscreen"
+            mozallowfullscreen="mozallowfullscreen"
+            id="reader-youtube-video"
+            data-bind="attr: {title: assignment().name(),
+                              src: 'https://www.youtube.com/embed/'+youtube()+'?feature=oembed&rel=0&enablejsapi=1'},
+                       hidden: !youtube().length || video().length">
+        </iframe>
+        <div data-bind="markdowned: {value: assignment().instructions(), assignment: assignment, submission: submission}"
+            class="p-4"></div>
+        <!-- ko if: startTimerButton -->
+        <div class="text-center mb-4">
+            <!-- ko if: submission() && submission().dateStarted() -->
+            <button class="btn btn-primary btn-lg" disabled>
+                Exam has begun, please continue working.
+            </button>
+            <!-- /ko -->
+            <!-- ko if: submission() && !submission().dateStarted() -->
+            <button class="btn btn-primary btn-lg" data-bind="click: startTimer">
+                I am ready to start the exam!
+            </button>
+            <!-- /ko -->
+        </div>
+        <!-- /ko -->
+        <hr>
+    </div>

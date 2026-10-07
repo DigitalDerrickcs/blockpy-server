@@ -1,0 +1,179 @@
+<!-- This was going to be the way to edit the review scores for a group of students.
+ But I realized that was not the way to go - you actually should just give a
+ feedback that balances out the others in one of the assignments.
+ Unfortunately, groups can't have scores!
+ -->
+
+{% extends 'helpers/layout.html' %}
+
+{% block title %}
+Review Editor: {{ course.name }}
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+function getCurrentValuesAsUrl() {
+    const baseUrl = new URL({{ url_for('grading.group_review_editor')|tojson }},
+        window.location.origin);
+    const selectedCourse = $("#search-courses").val();
+    const selectedStudent = $("#search-students").val();
+    const selectedGroup = $("#search-groups").val();
+    const sortCoursesBy = $("#sort-courses-by").val();
+    const sortStudentsBy = $("#sort-students-by").val();
+    const params = {};
+    if (selectedCourse) {
+        params['course_id'] = selectedCourse;
+    }
+    if (selectedStudent) {
+        params['student_id'] = selectedStudent;
+    }
+    if (selectedGroup) {
+        params['assignment_group_id'] = selectedGroup;
+    }
+    if (sortCoursesBy) {
+        params['sort_courses_by'] = sortCoursesBy;
+    }
+    if (sortStudentsBy) {
+        params['sort_students_by'] = sortStudentsBy;
+    }
+    baseUrl.search = new URLSearchParams(params).toString();
+    return baseUrl.toString();
+}
+
+$(function() {
+    $(".selection-menu").on("change", function(i, v) {
+        if (i.target.value !== "") {
+            window.location.href = getCurrentValuesAsUrl();
+        }
+    });
+});
+
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+    <h1>Bulk Manually Grade Submission</h1>
+
+    <p>Back to <a href="{{ url_for('courses.course', course_id=course_id) }}">Course: <code>{{ course.name }}</code></a></p>
+    <div class="row">
+        <div class="col-md-8">
+
+            <label>Course:
+            <select id="search-courses" class="selection-menu form-control">
+                <option value=""></option>
+                {% for course in available_courses %}
+                <option value="{{ course.id }}"
+                {%- if course.id == course_id %} selected {%- endif %} >{{ course.name }} ({{ course.id }})</option>
+                {% endfor %}
+            </select>
+            </label>
+            <br><br>
+
+            <label>Student:
+            <select id='search-students' class="selection-menu form-control">
+                <option value=''></option>
+                {% for student in students %}
+                <option value='{{ student.id }}'
+                {%- if student.id == student_id %} selected
+                {%- endif %} >
+                    {{ student.last_name +", " + student.first_name if sort_students_by == "last_name" else student.name() }}
+                    ({{ student.email }})</option>
+                {% endfor %}
+            </select>
+            </label>
+            <br><br>
+
+            <label>Assignment Groups:
+            <select id='search-groups' class="selection-menu form-control">
+            <option value=''></option>
+            {% for group in groups %}
+                {% if group != None %}
+                    <option value="{{ group.id }}"
+                    {%- if group.id == assignment_group_id %} selected
+                    {%- endif %} >{{ group.name }}</option>
+                {% endif %}
+            {% endfor %}
+            </select>
+            </label>
+            <br><br>
+        </div>
+
+        <div class="col-md-4">
+            <label>Sort Courses by:
+            <select id="sort-courses-by" class="selection-menu form-control">
+                <option value="name" {%- if sort_courses_by == "name" %} selected {%- endif %}>Name</option>
+                <option value="date_created" {%- if sort_courses_by == "date_created" %} selected {%- endif %}>Date Created</option>
+            </select>
+            </label>
+            <br><br>
+
+            <label>Sort Students by:
+            <select id="sort-students-by" class="selection-menu form-control">
+                <option value="last_name" {%- if sort_students_by == "last_name" %} selected {%- endif %}>Last Name</option>
+                <option value="first_name" {%- if sort_students_by == "first_name" %} selected {%- endif %}>First Name</option>
+                <option value="email" {%- if sort_students_by == "email" %} selected {%- endif %}>Email</option>
+            </select>
+            </label>
+            <br><br>
+
+        </div>
+    </div>
+
+    {% if student and group and course%}
+        <p>The student {{ student.name() }} (<code>{{ student.id }}</code>)
+        does NOT have submissions
+        for assignment group {{ group.title() }} (<code>{{ group.id }}</code>)
+        in course {{ course.name }} (<code>{{ course.id }}</code>)
+        .</p>
+        {% else %}
+        <div>
+        
+            <textarea id="general-feedback" class="form-control" rows="3" placeholder="General feedback">
+                {{ common_feedback }}
+            </textarea>
+        </div>
+
+        <table class="table table-bordered table-condensed table-hover table-striped">
+        <thead>
+            <tr>
+                <th>Assignment</th>
+                <th>Points Possible</th>
+                <th>Submission Status</th>
+                <th>Autograder Score</th>
+                <th>Review Score Modifiers</th>
+                <th>Final Points Earned</th>
+            </tr>
+        </thead>
+        <tr class="table-secondary">
+            <td>Total:</td>
+            <td>{{ total_possible }}</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td>{{ (100*total_score)|int }}%</td>
+        </tr>
+        {% for assignment, submission in assignments|zip(submissions) %}
+            <tr>
+                <td>{{ assignment.name }}</td>
+                <td>{{ assignment.points }}</td>
+                <td>{{ submission.submission_status if submission else "Not yet started" }}</td>
+                <td>{{ (1 if submission.correct else submission.score) if submission else "0" }}</td>
+                <td>
+                    {{ submission.get_review_scores_explained() if submission else "" }}
+                </td>
+                {% set (final_score, final_reason) = submission.penalized_full_score() if submission else (0, "") %}
+                <td title={{ final_reason|join("\n<br>")|tojson }}>{{ final_score }}</td>
+            </tr>
+        {% endfor %}
+        </table>
+    {% endif %}
+
+
+{% endblock %}

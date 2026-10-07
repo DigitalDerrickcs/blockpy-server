@@ -29,14 +29,15 @@
 {% endblock %}
 
 {% block body %}
-    <h1>Welcome to BlockPy!</h1>
-    {% if g.user %}
-        <a href="{{ url_for('courses.index') }}" class="btn btn-outline-secondary">View Courses</a>
+    <div class="jumbotron">
+    <h1 class="display-4">Welcome to BlockPy!</h1>
+    <p class="lead">The dual block/text programming environment with sophisticated autograding and many other cool features!</p>
+    {% if g.user and not g.user.anonymous %}
+
+        <a href="{{ url_for('courses.index') }}" class="btn btn-outline-secondary btn-lg">View Courses</a>
         {% if g.user.is_admin() %}
             <br><br><a href="{{ url_for('admin.index') }}" class="btn btn-outline-secondary">Administration</a>
         {% endif %}
-    {% elif config.SHOW_ABOUT_PAGE %}
-        {% include "about.html" %}
     {% else %}
         <p>
             If you are an instructor or administrator, you can
@@ -44,5 +45,11 @@
             <a class="" href="{{ url_for('security.register') }}">Register</a>
         </p>
         <p>If you are a student, you should use your school's Learning Management System (e.g., Canvas).</p>
+    {% endif %}
+    </div>
+
+    <hr>
+    {% if config.SHOW_ABOUT_PAGE %}
+        {% include "about.html" %}
     {% endif %}
 {% endblock %}

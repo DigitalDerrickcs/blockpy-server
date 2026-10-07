@@ -3,56 +3,119 @@ import json
 import csv
 import io
 import os.path as op
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+import pytz
 # Import Flask
 from flask_admin import Admin, BaseView, expose, form
 from flask_admin.contrib.sqla import ModelView
 from flask_admin.contrib.fileadmin import FileAdmin
-from flask import g, Blueprint, request, url_for, render_template, Response
+from flask import g, Blueprint, request, url_for, render_template, Response, current_app, session
 from flask_admin.contrib.sqla.ajax import QueryAjaxModelLoader
-from jinja2 import Markup
+from flask_admin.model.filters import BaseFilter
+from markupsafe import Markup
 
-# Import runestone
-from main import app
-from controllers.helpers import admin_required
-from models.models import (db, AssignmentGroupMembership)
-from models.review import Review
+from sqlalchemy import func, text as sql_text, Date, cast
+from sqlalchemy_utc import UtcDateTime
+from wtforms import StringField
+
+from models import db
 from models.user import User
 from models.course import Course
 from models.role import Role
 from models.authentication import Authentication
-from models.log import Log
+from models.log_tables import RoleLog, AccessLog, ErrorLog, CourseLog, AssignmentLog, SubmissionLog
 from models.submission import Submission
 from models.sample_submission import SampleSubmission
+from models.review import Review
 from models.assignment import Assignment
 from models.assignment_group import AssignmentGroup
+from models.assignment_group_membership import AssignmentGroupMembership
 from models.assignment_tag import AssignmentTag
+from models.report import Report
+from models.invite import Invite
+from models.grade_history import GradeHistory
+from models.counters.submission_counts import SubmissionCounts
+from flask_admin.contrib.sqla.form import AdminModelConverter, validators
 
-admin = Admin(app)
 
+class CustomConverter(AdminModelConverter):
+    def get_converter(self, column):
+        if isinstance(column.type, UtcDateTime):
+            return self.convert_datetime
+        else:
+            return super().get_converter(column)
+
+
+def make_ajax_fields(*fields):
+    return {
+        'fields': fields,
+        'placeholder': 'Please select',
+        'page_size': 10,
+        'minimum_input_length': 0
+    }
+
+DATE_ARGS_FORMAT = dict(format='%Y-%m-%dT%H:%M')
+DATE_WIDGET_ARGS_FORMAT = {
+    'data-date-format': '%Y-%m-%dT%H:%M',
+    'data-role': 'none',
+    'type': 'datetime-local',
+}
 
 class RegularView(ModelView):
+    model_form_converter = CustomConverter
+    _UTC_FIELDS = []
+
+
     def is_accessible(self):
         if g.user:
             return g.user.is_admin()
         return False
 
 
+    def on_model_change(self, form, model, is_created):
+        #user_timezone = session.get("timezone", current_app.config.get('LOCAL_TIMEZONE', 'US/Eastern'))
+        user_timezone = "UTC"
+
+        for field_name, field_value in form.data.items():
+            if isinstance(field_value, datetime):
+                if field_name in self._UTC_FIELDS:
+                    aware_time = field_value.replace(tzinfo=ZoneInfo(user_timezone))
+                    utc_time = aware_time.astimezone(ZoneInfo('UTC'))
+                    setattr(model, field_name, utc_time)
+        super().on_model_change(form, model, is_created)
+
+
+
 class UserView(RegularView):
     def _list_roles(view, context, model, name):
-        return Markup('<br>\n'.join(('{} in {}'.format(role.name,
-                                              Course.query.get(role.course_id).name
-                                              if role.course_id is not None else 'all courses')
-                            for role in model.roles.all())))
+        display_roles = []
+        for role in model.roles:
+            if role.course_id is None:
+                display_roles.append(f"{role.name} in all courses")
+                continue
+            course = Course.query.get(role.course_id)
+            if course is None:
+                display_roles.append(f"{role.name} in Course ID {role.course_id} (Missing course?)")
+                continue
+            display_roles.append(f"{role.name} in {course.name}")
+        return Markup('<br>\n'.join(display_roles))
 
     column_hide_backrefs = False
     column_formatters = {'roles': _list_roles}
-    form_excluded_columns = ('password','assignments','authentications', 'roles')
+    form_excluded_columns = ('password', 'roles', 'authentications',
+                             'assignments', 'assignment_groups', 'courses',
+                             'tags', 'submission_logs', 'assignment_logs', 'course_logs',
+                             'role_logs', 'access_logs', 'approvals', 'invites',
+                             'authorizer_logs',
+                             'reviews', 'submissions', 'reports',
+                             'invites', 'grade_history')
     column_exclude_list = ('password', 'proof')
     column_display_pk = True
     column_searchable_list = ('first_name', 'last_name', 'email')
-    column_list = ('id', 'first_name', 'last_name', 'email', 'active', 'roles')
-    column_filters = ('first_name', 'last_name', 'email')
+    column_list = ('id', 'first_name', 'last_name', 'email', 'active', 'anonymous', 'roles')
+    column_filters = ('id', 'first_name', 'last_name', 'email', 'active', 'anonymous')
 
 
 class ModelIdView(RegularView):
@@ -98,6 +161,7 @@ def _render_settings(view, context, model, name):
     body += "</pre>"
     return Markup(body)
 
+
 SHRUNK_STYLE = "style='max-height:10em;overflow:auto'"
 
 
@@ -114,9 +178,9 @@ def _render_assignment_settings(view, context, model, name):
     instructions = "<div {}>".format(SHRUNK_STYLE) + model.instructions + "</div>"
     on_run = "<pre {}>".format(SHRUNK_STYLE) + model.on_run + "</pre>"
     starting_code = "<pre {}>".format(SHRUNK_STYLE) + model.starting_code + "</pre>"
-    return Markup( (instructions if model.instructions else "" )+
-                   (on_run if model.on_run else "") +
-                   (starting_code if model.starting_code else ""))
+    return Markup((instructions if model.instructions else "") +
+                  (on_run if model.on_run else "") +
+                  (starting_code if model.starting_code else ""))
 
 
 def _render_assignment_type(view, context, model, name):
@@ -128,9 +192,10 @@ def _render_version(view, context, model, name):
     body += "<p>A: {}</p>".format(model.assignment_version)
     return Markup(body)
 
+
 def _render_assignment_name(view, context, model, name):
-    return Markup((model.name if model.name else "")+
-                  "<br><br>"+
+    return Markup((model.name if model.name else "") +
+                  "<br><br>" +
                   (model.url if model.url else ""))
 
 
@@ -146,13 +211,19 @@ class RoleView(RegularView):
     column_sortable_list = ('id', 'date_created', 'name', 'user_id', 'course_id')
     column_formatters = {'user_id': _id(User),
                          'course_id': _id(Course)}
-    #form_columns = ('name', 'user_id', 'course_id')
+    column_filters = ('id', 'date_created', 'name', 'user_id', 'course_id')
+    # form_columns = ('name', 'user_id', 'course_id')
+    form_ajax_refs = {
+        'course': make_ajax_fields('id', 'url', 'name'),
+        'user': make_ajax_fields('first_name', 'last_name', 'email', 'id')
+    }
+    form_excluded_columns = ('role_logs', )
 
 
 def _render_course_service(view, context, model, name):
-    return Markup(model.service+"<br>"+
-                  (model.external_id+"<br>" if model.external_id else "")+
-                  (model.endpoint+"<br>" if model.endpoint else ""))
+    return Markup(model.service + "<br>" +
+                  (model.external_id + "<br>" if model.external_id else "") +
+                  (model.endpoint + "<br>" if model.endpoint else ""))
 
 
 class CourseView(RegularView):
@@ -170,29 +241,46 @@ class CourseView(RegularView):
     settings = Column(Text(), default="")'''
     column_list = ('id', 'date_modified', 'name', 'url', 'owner_id',
                    'service', 'visibility', 'term', 'settings')
-    column_searchable_list = ('name', 'url')
-    column_filters = ('name', 'date_modified', 'url', 'term', 'owner_id', 'service')
+    form_excluded_columns = ('roles', 'assignments', 'assignment_groups',
+                             'course_logs', 'role_logs', 'assignment_logs',
+                             'tags', 'submission_logs', 'submissions', 'invites', 'reports')
+    column_searchable_list = ('id', 'name', 'url')
+    column_filters = ('id', 'name', 'date_modified', 'url', 'term', 'owner_id', 'service')
     column_formatters = {'service': _render_course_service}
+    form_ajax_refs = {
+        'owner': make_ajax_fields('first_name', 'last_name', 'email', 'id'),
+    }
 
 
 class AssignmentView(RegularView):
     can_export = True
     column_list = ('id', 'date_modified',
                    'owner_id', 'course_id',
-                   'name',  #"url", # 'type', #'body',
+                   'name',  # "url", # 'type', #'body',
                    'on_run',  # 'starting_code',
                    'reviewed', 'hidden',
                    # 'visibility', 'disabled',
                    # 'mode',
                    'version'
                    )
-    column_searchable_list = ('name', 'instructions')
+    column_searchable_list = ('name', 'url', 'instructions')
     form_widget_args = {
         'description': {
             'style': 'width: 25%'
         }
     }
-    column_filters = ('name', 'on_run', 'course_id', 'url', 'instructions', 'reviewed', 'hidden', 'public')
+    form_ajax_refs = {
+        'owner': make_ajax_fields('first_name', 'last_name', 'email', 'id'),
+        'course': make_ajax_fields('id', 'url', 'name'),
+        'forked': make_ajax_fields('name', 'url', 'id'),
+        'tags': make_ajax_fields('name', 'id'),
+        'sample_submissions': make_ajax_fields('id'),
+    }
+    form_excluded_columns = ('memberships', 'assignment_logs', 'submission_logs',
+                             'submissions', 'reports', 'sample_submissions', 'tags',
+                             'forks')
+    # form_columns = ('id', 'date_modified')
+    column_filters = ('id', 'name', 'on_run', 'course_id', 'url', 'instructions', 'reviewed', 'hidden', 'public')
     column_formatters = {'name': _render_assignment_name,
                          # 'type': _render_assignment_type,
                          'on_run': _render_assignment_settings  # _render_code,
@@ -202,29 +290,62 @@ class AssignmentView(RegularView):
 
 class AssignmentGroupView(RegularView):
     can_export = True
+
     def _list_assignments(view, context, model, name):
         assignments = model.get_assignments()
         if assignments and assignments[0].type == 'maze':
-            return Markup("Levels: "+(', '.join((assignment.name for assignment in assignments))))
+            return Markup("Levels: " + (', '.join((assignment.name for assignment in assignments))))
         return Markup("<ol>{}</ol>".format(
             '\n'.join(("<li>{}</li>".format(assignment.name) for assignment in assignments))))
+
     column_list = ('id', 'date_modified',
                    'owner_id', 'course_id',
                    'name', 'url', 'assignments'
                    )
     column_filters = ('url', 'course_id', 'name')
     column_formatters = {'assignments': _list_assignments}
+    form_excluded_columns = ('memberships', 'submissions')
+    form_ajax_refs = {
+        'owner': make_ajax_fields('first_name', 'last_name', 'email', 'id'),
+        'course': make_ajax_fields('id', 'url', 'name'),
+        'forked': make_ajax_fields('name', 'url', 'id')
+    }
 
 
 class LogView(RegularView):
-    can_export=True
+    can_export = True
     column_list = ('id', 'date_modified',
                    'course_id', 'assignment_id', 'subject_id',
                    'event_type', 'category',
                    'label', 'message'
                    )
     column_formatters = {'message': _render_code}
-    column_filters = ('course_id', 'assignment_id', 'subject_id', 'event_type', 'category', 'label', 'message')
+    column_filters = ('id', 'date_modified',
+                      'course_id', 'assignment_id', 'subject_id', 'event_type', 'category', 'label', 'message')
+    form_ajax_refs = {
+        'assignment': make_ajax_fields('name', 'url', 'id'),
+        'course': make_ajax_fields('id', 'url', 'name'),
+        'subject': make_ajax_fields('first_name', 'last_name', 'email', 'id')
+    }
+    simple_list_pager = True
+
+    def get_count_query(self):
+        """
+        Need to override this because we have MASSIVE tables sometimes
+        """
+        # dialect_name = self.session.get_bind().dialect.name
+        # if dialect_name == "postgresql":
+        #     query = sql_text("""
+        #         SELECT reltuples::bigint
+        #         FROM pg_class
+        #         WHERE relname = :table_name;
+        #     """)
+        #     return self.session.execute(query, {"table_name": self.model.__tablename__})
+        # elif dialect_name == "sqlite":
+        #     query = sql_text(f"SELECT count(*) FROM {self.model.__tablename__};")
+        #     return self.session.execute(query)
+        # else:
+        return self.session.query(func.count('*')).select_from(self.model)
 
 
 class AssignmentGroupMembershipView(RegularView):
@@ -233,10 +354,14 @@ class AssignmentGroupMembershipView(RegularView):
                    'assignment_group_id', 'assignment_id',
                    'position'
                    )
-    #form_columns = ('assignment_group_id', 'assignment_id', 'position')
-    column_filters = ('assignment_id', 'assignment_group_id')
+    # form_columns = ('assignment_group_id', 'assignment_id', 'position')
+    column_filters = ('id', 'date_modified', 'assignment_id', 'assignment_group_id')
     column_formatters = {'user_id': _editable(User, 'id'),
                          'course_id': _editable(Course, 'id')}
+    form_ajax_refs = {
+        'assignment': make_ajax_fields('name', 'url', 'id'),
+        'assignment_group': make_ajax_fields('name', 'url', 'id')
+    }
 
 
 class AssignmentTagView(RegularView):
@@ -248,6 +373,7 @@ class AssignmentTagView(RegularView):
                    )
     column_formatters = {'owner_id': _editable(User, 'id'),
                          'course_id': _editable(Course, 'id')}
+    form_excluded_columns = ('reviews', 'assignments', )
 
 
 class ReviewView(RegularView):
@@ -261,8 +387,11 @@ class ReviewView(RegularView):
     column_formatters = {'author_id': _editable(User, 'id'), 'submission_id': _editable(Submission, 'id')}
 
     form_ajax_refs = {
-        'submission': QueryAjaxModelLoader('submission', db.session, Submission, fields=['id'], page_size=10)
+        'submission': QueryAjaxModelLoader('submission', db.session, Submission, fields=['id'], page_size=10),
+        'author': make_ajax_fields('first_name', 'last_name', 'email', 'id'),
+        'forked': make_ajax_fields('id')
     }
+    form_excluded_columns = ('tag', )
 
 
 class SampleSubmissionView(RegularView):
@@ -275,6 +404,61 @@ class SampleSubmissionView(RegularView):
                    )
     column_formatters = {'owner_id': _editable(User, 'id'),
                          'assignment_id': _editable(Assignment, 'id')}
+    form_ajax_refs = {
+        'assignment': make_ajax_fields('name', 'url', 'id'),
+    }
+
+class AuthenticationView(ModelIdView):
+    form_ajax_refs = {
+        'user': make_ajax_fields('first_name', 'last_name', 'email', 'id')
+    }
+
+    _UTC_FIELDS = ["expires_at"]
+
+    form_args = dict(
+        expires_at=DATE_ARGS_FORMAT,
+    )
+    form_widget_args = dict(
+        expires_at=DATE_WIDGET_ARGS_FORMAT,
+    )
+
+
+class InviteView(ModelIdView):
+    form_ajax_refs = {
+        'user': make_ajax_fields('first_name', 'last_name', 'email', 'id'),
+        'course': make_ajax_fields('id', 'url', 'name')
+    }
+
+    _UTC_FIELDS = ["expires"]
+
+    form_args = dict(
+        expires=DATE_ARGS_FORMAT,
+    )
+    form_widget_args = dict(
+        expires=DATE_WIDGET_ARGS_FORMAT,
+    )
+
+
+class ReportView(ModelIdView):
+    column_filters = ('id',
+                      'task', 'status', 'attempt', 'result', 'progress', 'message',
+                      'date_started', 'date_modified', 'date_finished',
+                      'parameters', 'visibility',
+                      'owner_id', 'assignment_id', 'course_id',
+                      )
+    form_ajax_refs = {
+        'assignment': make_ajax_fields('name', 'url', 'id'),
+        'course': make_ajax_fields('id', 'url', 'name'),
+        'owner': make_ajax_fields('first_name', 'last_name', 'email', 'id')
+    }
+    column_searchable_list = ('task', 'status', 'message', 'parameters')
+    column_formatters = {'parameters': _render_code}
+    column_list = ('id',
+                   'task', 'status', 'attempt', 'result', 'progress', 'message',
+                   'date_created', 'date_started', 'date_modified', 'date_finished',
+                   'parameters', 'visibility',
+                   'owner', 'assignment', 'course',
+                   )
 
 
 class SubmissionView(RegularView):
@@ -285,26 +469,93 @@ class SubmissionView(RegularView):
                    "submission_status", "grading_status",
                    'version', 'url'
                    )
-    column_filters = ('user_id', 'assignment_id', 'course_id',
-                      'date_modified', 'correct', 'submission_status', 'grading_status')
+    column_sortable_list = column_list
+    column_filters = ('id', 'user_id', 'assignment_id', 'course_id',
+                      'date_modified', 'correct', 'submission_status', 'grading_status',
+                      'endpoint')
     column_formatters = {'code': _render_code, 'endpoint': _smaller,
                          'version': _render_version}
     column_formatters_export = None
     column_export_list = None
 
+    form_ajax_refs = {
+        'assignment': make_ajax_fields('name', 'url', 'id'),
+        'assignment_group': make_ajax_fields('name', 'url', 'id'),
+        'course': make_ajax_fields('id', 'url', 'name'),
+        'user': make_ajax_fields('first_name', 'last_name', 'email', 'id')
+    }
+    form_excluded_columns = ('reviews', 'grade_history', 'submission_logs', 'counts')
+    simple_list_pager = True
+    _UTC_FIELDS = ["date_started", "date_submitted", "date_graded", "date_due", "date_locked"]
+    form_args = dict(
+        date_started=DATE_ARGS_FORMAT,
+        date_submitted=DATE_ARGS_FORMAT,
+        date_graded=DATE_ARGS_FORMAT,
+        date_due=DATE_ARGS_FORMAT,
+        date_locked=DATE_ARGS_FORMAT,
+    )
+    form_widget_args = dict(
+        date_started=DATE_WIDGET_ARGS_FORMAT,
+        date_submitted=DATE_WIDGET_ARGS_FORMAT,
+        date_graded=DATE_WIDGET_ARGS_FORMAT,
+        date_due=DATE_WIDGET_ARGS_FORMAT,
+        date_locked=DATE_WIDGET_ARGS_FORMAT,
+    )
 
-admin.add_view(UserView(User, db.session, category='Tables'))
-admin.add_view(CourseView(Course, db.session, category='Tables'))
-admin.add_view(SubmissionView(Submission, db.session, category='Tables'))
-admin.add_view(SampleSubmissionView(SampleSubmission, db.session, category='Tables'))
-admin.add_view(AssignmentView(Assignment, db.session, category='Tables'))
-admin.add_view(AssignmentGroupView(AssignmentGroup, db.session, category='Tables'))
-admin.add_view(AssignmentGroupMembershipView(AssignmentGroupMembership, db.session, category='Tables'))
-admin.add_view(AssignmentTagView(AssignmentTag, db.session, category='Tables'))
-admin.add_view(ModelIdView(Authentication, db.session, category='Tables'))
-admin.add_view(RoleView(Role, db.session, category='Tables'))
-admin.add_view(LogView(Log, db.session, category='Tables'))
-admin.add_view(ReviewView(Review, db.session, category='Tables'))
 
-# admin.add_view(FileAdmin(app.config['BLOCKPY_LOG_DIR'], base_url='/admin/code_logs/', name='Disk Logs'))
-admin.add_view(FileAdmin(app.config['UPLOADS_DIR'], '', name='File Uploads'))
+class GradeHistoryView(RegularView):
+    can_export = True
+    form_ajax_refs = {
+        'grader': make_ajax_fields('first_name', 'last_name', 'email', 'id'),
+        'submission': QueryAjaxModelLoader('submission', db.session, Submission, fields=['id'], page_size=10),
+    }
+    column_filters = ('id', 'submission_id', 'grader_id', 'score', 'date_submitted')
+
+class SubmissionCountView(RegularView):
+    can_export = True
+    form_ajax_refs = {
+        'submission': QueryAjaxModelLoader('submission', db.session, Submission, fields=['id'], page_size=10),
+    }
+    column_list = ('id', 'submission_id', 'metric', 'value')
+    column_filters = ('id', 'submission_id', 'metric', 'value')
+
+class ProtectedFileAdmin(FileAdmin):
+    can_upload = False
+    can_delete = False
+    can_delete_dirs = False
+    can_mkdir = False
+    can_rename = False
+
+    def is_accessible(self):
+        if g.user:
+            return g.user.is_admin()
+        return False
+
+def setup_admin(app):
+    admin = Admin(app)
+    admin.add_view(UserView(User, db.session, category='Tables'))
+    admin.add_view(CourseView(Course, db.session, category='Tables'))
+    admin.add_view(SubmissionView(Submission, db.session, category='Tables'))
+    admin.add_view(SampleSubmissionView(SampleSubmission, db.session, category='Tables'))
+    admin.add_view(AssignmentView(Assignment, db.session, category='Tables'))
+    admin.add_view(AssignmentGroupView(AssignmentGroup, db.session, category='Tables'))
+    admin.add_view(AssignmentGroupMembershipView(AssignmentGroupMembership, db.session, category='Tables'))
+    admin.add_view(AssignmentTagView(AssignmentTag, db.session, category='Tables'))
+    admin.add_view(AuthenticationView(Authentication, db.session, category='Tables'))
+    admin.add_view(RoleView(Role, db.session, category='Tables'))
+    admin.add_view(LogView(SubmissionLog, db.session, category='Tables'))
+    # TODO: Other logs tables
+    admin.add_view(ReviewView(Review, db.session, category='Tables'))
+    admin.add_view(ReportView(Report, db.session, category='Tables'))
+    admin.add_view(InviteView(Invite, db.session, category='Tables'))
+    admin.add_view(GradeHistoryView(GradeHistory, db.session, category='Tables'))
+    admin.add_view(SubmissionCountView(SubmissionCounts, db.session, category='Tables'))
+
+    # admin.add_view(FileAdmin(app.config['BLOCKPY_LOG_DIR'], base_url='/admin/code_logs/', name='Disk Logs'))
+    # TODO: Add redis console
+    admin.add_view(ProtectedFileAdmin(app.config['UPLOADS_DIR'], '', name='File Uploads'))
+    # TODO: Figure out how to make multiple fileadmin work
+    report_dir = ProtectedFileAdmin(app.config['REPORT_DIR'], '', name='Reports')
+    report_dir.endpoint = 'ReportFiles'
+    admin.add_view(report_dir)
+    return admin

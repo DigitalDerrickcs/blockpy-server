@@ -1,7 +1,8 @@
 import * as ko from 'knockout';
 import {Model, ModelJson, ModelStore} from "./model";
-import {capitalize, TwoWayReadonlyMap} from "../components/plugins";
-import {ajax_get} from "../components/ajax";
+import {capitalize, naturalCompare, TwoWayReadonlyMap} from "../services/plugins";
+import {ajax_get} from "../services/ajax";
+import {AssignmentGroup, AssignmentGroupJson} from "./assignment_group";
 
 export interface AssignmentJson extends ModelJson {
     id: number;
@@ -13,7 +14,9 @@ export interface AssignmentJson extends ModelJson {
     reviewed: boolean;
     hidden: boolean;
     public: boolean;
+    subordinate: boolean;
     ip_ranges: string;
+    points: number;
     settings: string;
 
     on_run: string;
@@ -39,8 +42,10 @@ export class Assignment extends Model<AssignmentJson> {
     reviewed: KnockoutObservable<boolean>;
     hidden: KnockoutObservable<boolean>;
     public: KnockoutObservable<boolean>;
+    subordinate: KnockoutObservable<boolean>;
     ipRanges: KnockoutObservable<string>;
     settings: KnockoutObservable<string>;
+    points: KnockoutObservable<number>;
     onRun: KnockoutObservable<string>;
     onChange: KnockoutObservable<string>;
     onEval: KnockoutObservable<string>;
@@ -53,6 +58,10 @@ export class Assignment extends Model<AssignmentJson> {
     courseId: KnockoutObservable<number>;
     version: KnockoutObservable<number>;
 
+    title: KnockoutReadonlyComputed<string>;
+    editUrl: KnockoutReadonlyComputed<string>;
+    group: KnockoutObservable<AssignmentGroup|null>;
+
     FIELDS: TwoWayReadonlyMap = new TwoWayReadonlyMap({
         "name": "name",
         "url": "url",
@@ -61,7 +70,9 @@ export class Assignment extends Model<AssignmentJson> {
         "reviewed": "reviewed",
         "hidden": "hidden",
         "public": "public",
+        "subordinate": "subordinate",
         "ip_ranges": "ipRanges",
+        "points": "points",
         "settings": "settings",
         "on_run": "onRun",
         "on_change": "onChange",
@@ -80,12 +91,52 @@ export class Assignment extends Model<AssignmentJson> {
 
     constructor(data: AssignmentJson) {
         super(data);
+        this.group = ko.observable<AssignmentGroup>(null);
         this.koFromJson(data);
+        this.title = ko.pureComputed<string>(() => {
+            if (this.type().toLowerCase() === "maze") {
+                return "Maze "+this.name();
+            } else {
+                return this.name();
+            }
+        }, this);
+        this.editUrl = ko.pureComputed<string>(() => {
+            if (this.type() === "reading") {
+                return window["$URL_ROOT"]+"/assignments/reading/" + (
+                    this.url() ? this.url() : this.id) + "?";
+            } else {
+                return window["$URL_ROOT"]+"/assignments/load/" + (
+                    this.url() ? `?assignment_url=${this.url()}`
+                        : `?assignment_id=${this.id}`);
+            }
+        }, this);
     }
+}
+
+/** Natural (group name, assignment title) ordering, with ungrouped assignments
+ * forced to the end -- the same order the server's natsorted listings use. */
+export function compareAssignmentsByGroup(left: Assignment, right: Assignment): number {
+    const leftGroup = left.group() != null ? left.group().name() : null;
+    const rightGroup = right.group() != null ? right.group().name() : null;
+    if ((leftGroup == null) !== (rightGroup == null)) {
+        return leftGroup == null ? 1 : -1;
+    }
+    return naturalCompare(leftGroup || "", rightGroup || "") || naturalCompare(left.title(), right.title());
 }
 
 export class AssignmentStore extends ModelStore<AssignmentJson, Assignment> {
     GET_FIELD: string = "assignments";
+
+    getIdByUrl(url: string): Promise<number> {
+        return new Promise((resolve, reject) => {
+            const target = Object.values(this.data).find((potential: Assignment) => potential.url() === url);
+            if (target !== undefined) {
+                resolve(target.id);
+            } else {
+                this.getByUrl(url).then((assignment: Assignment)=> resolve(assignment.id)).catch(reject);
+            }
+        });
+    }
 
     getPayload(): any {
         return {
@@ -110,7 +161,9 @@ export class AssignmentStore extends ModelStore<AssignmentJson, Assignment> {
             reviewed: false,
             hidden: false,
             public: false,
+            subordinate: false,
             ip_ranges: "",
+            points: 1,
             settings: "",
             on_run: "",
             on_change: "",
@@ -127,7 +180,63 @@ export class AssignmentStore extends ModelStore<AssignmentJson, Assignment> {
     }
 
     getLocalStorageKey(): string {
-        return `BLOCKPY_COURSE_${this.courseId}_ASSIGNMENTS`;
+        return `COURSE_${this.courseId}_ASSIGNMENTS`;
+    }
+
+    getByUrl(url: string): Promise<Assignment> {
+        return new Promise((resolve, reject) => {
+            ajax_get("assignments/by_url", {url, course_id: this.courseId}).then((data) => {
+                if (data.success) {
+                    let rawAssignment: AssignmentJson = data.assignment;
+                    let created: Assignment = this.newInstance(rawAssignment);
+                    resolve(created);
+                } else {
+                    reject(data);
+                }
+            });
+        });
+    }
+
+    /** Preload the full course listing (with each assignment's group, aligned by
+     * index like assignments/get_ids) so selectors don't need to fetch it. */
+    preloadWithGroups(assignments: AssignmentJson[], groups: (AssignmentGroupJson | null)[]): Assignment[] {
+        const created = assignments.map((assignmentJson: AssignmentJson, index: number) => {
+            const assignment = this.newInstance(assignmentJson);
+            if (groups[index] != null) {
+                assignment.group(this.server.assignmentGroupStore.newInstance(groups[index]));
+            }
+            return assignment;
+        });
+        this.allAvailable = created.sort(compareAssignmentsByGroup);
+        return this.allAvailable;
+    }
+
+    getAllAvailable(payload?: any) {
+        if (this.allAvailable !== null) {
+            return Promise.resolve(this.allAvailable);
+        }
+        payload = payload || this.getPayload();
+        let url = this.getUrl();
+        return new Promise((resolve, reject) => {
+            ajax_get(url, payload).then((data) => {
+                if (data.success) {
+                    let assignments: AssignmentJson[] = data.assignments;
+                    let groups: AssignmentGroupJson[] = data.groups;
+                    let created: Assignment[] = [];
+                    for (let i=0; i<assignments.length; i+= 1) {
+                        let assignment = this.newInstance(assignments[i]);
+                        if (groups[i] !== null) {
+                            let group = this.server.assignmentGroupStore.newInstance(groups[i]);
+                            assignment.group(group);
+                        }
+                        created.push(assignment);
+                    }
+                    resolve(created.sort(compareAssignmentsByGroup));
+                } else {
+                    reject(data);
+                }
+            });
+        });
     }
 }
 
@@ -136,7 +245,7 @@ export const AssignmentTemplate = `
 `;
 
 export const AssignmentShortTemplate = `
-    <div>Assignment: <span data-bind="text: name"></span> (<span data-bind="text: url"></span>)</div>
+    <div>Assignment: <span data-bind="text: name, attr: {title: url}"></span></div>
 `;
 
 ko.components.register("assignment", {

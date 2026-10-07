@@ -1,7 +1,7 @@
 {% extends 'helpers/layout.html' %}
 
 {% block title %}
-Courses: Submissions Filter
+Submissions: {{ course.name }}
 {% endblock %}
 
 {% block statusbar %}
@@ -11,61 +11,43 @@ Courses: Submissions Filter
 
 <script type='text/javascript'>
 
-function MainModel() {
-    var self = this;
-}
-mainModel = new MainModel();
-$().ready(function() {
-    ko.applyBindings(mainModel);
-    
-    $("#search-assignments").change(function(i, v) {
-        if (i.target.value != "") {
-            window.location.href = {{ url_for('courses.submissions_filter', course_id=course_id)|tojson }}+"?criteria=assignment&search_key="+i.target.value;
+    $().ready(function() {
+        let loggedInUser = {{ user.encode_json()|tojson }};
+        let course = {{ course.encode_json()|tojson }};
+        server = new frontend.Server(course.id, {}, {
+            users: [loggedInUser],
+            courses: [course]
+        });
+        // Preload the course's users and assignments so the selectors populate instantly
+        server.userStore.preload({{ users|tojson }});
+        server.assignmentStore.preloadWithGroups({{ assignments|tojson }}, {{ groups|tojson }});
+        mainModel = {
+            course: server.courseStore.getInstance(course.id),
+            server: server,
+            user: server.userStore.getInstance(loggedInUser.id),
+            criteria: {{ criteria|tojson }},
+            searchKey: {{ search_key|tojson }},
+            userIds: {{ request.values.get('user_ids', '')|tojson }},
+            assignmentIds: {{ request.values.get('assignment_ids', '')|tojson }}
         }
+        ko.applyBindings(mainModel);
     });
-    
-    $("#search-students").change(function(i, v) {
-        if (i.target.value != "") {
-            window.location.href = {{ url_for('courses.submissions_filter', course_id=course_id)|tojson }}+"?criteria=student&search_key="+i.target.value;
-        }
-    });
-});
-
 
 </script>
 {% endblock %}
 
 {% block body %}
 
-<h1>Submission Filter</h1>
+<h1>View Submissions</h1>
 
-<p>Back to <a href="{{ url_for('courses.course', course_id=course_id) }}">Course</a></p>
+<p class="text-muted small">Back to <a href="{{ url_for('courses.course', course_id=course_id) }}">{{ course.name }}</a></p>
 
-<label>Student:
-<select id='search-students'>
-<option value=''></option>
-{% for student in students %}
-<option value='{{ student.id }}'
-{%- if criteria == "student" and search_key == student.id %} selected 
-{%- endif %} >{{ student.last_name}}, {{ student.first_name }}</option>
-{% endfor %}
-</select>
-</label>
-<br><br>
-
-<label>Assignment:
-<select id='search-assignments'>
-<option value=''></option>
-{% for assignment in assignments %}
-<option value='{{ assignment.id }}'
-{%- if criteria == "assignment" and search_key == assignment.id %} selected 
-{%- endif %} >{{ assignment.title() }}</option>
-{% endfor %}
-</select>
-</label>
-<br><br>
-
-{% include "helpers/submission_table.html" %}
-
+<submissions-filter params="server: server,
+                            course: course,
+                            user: user,
+                            criteria: criteria,
+                            searchKey: searchKey,
+                            userIds: userIds,
+                            assignmentIds: assignmentIds"></submissions-filter>
 
 {% endblock %}

@@ -1,0 +1,125 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Run Similarity Report
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+    $(document).ready(() => {
+        $("#generate-report").click(() => {
+            const assignmentId = $("#choose-assignment").val();
+            const otherStudentThreshold = $("#other_student_threshold").val();
+            const starterCodeThreshold = $("#starter_code_threshold").val();
+            const minimumFileLength = $("#minimum_file_length").val();
+            const courseId = {{ course.id|tojson }};
+            console.log(assignmentId, otherStudentThreshold, starterCodeThreshold, minimumFileLength, courseId);
+        });
+    });
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+    <h1>Run Similarity Report</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert-warning">
+            {% for message in messages %}
+                {{ message }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This form will help you run a similarity report on an assignment for this course. Note that this
+        does not do the MOSS type things like check for variable name changes and ignoring whitespace. It's strictly looking
+        at edit distance. We're looking for low hanging fruit here.
+    </p>
+
+    <h3>Generate New Report</h3>
+
+    <span><strong>Course:</strong> {{ course.name }} (<code>{{ course.id }}</code>)</span><br>
+
+    <form method="post">
+    <label>Assignment:
+        <select id='assignment_id' name="assignment_id">
+        <option value=''></option>
+        {% for group, assignments in groups.items() %}
+            {% if group == None %}
+                <optgroup label="Ungrouped">
+            {% else %}
+                <optgroup label="{{ group }}">
+            {% endif %}
+            {% if assignments %}
+            {% for assignment in assignments %}
+                <option value='{{ assignment.id }}'
+                {%- if criteria == "assignment" and search_key == assignment.id %} selected
+                {%- endif %} >{{ assignment.title() }}</option>
+            {% endfor %}
+            {% endif %}
+            </optgroup>
+        {% endfor %}
+        </select>
+    </label><br>
+
+    <label>
+        Other Student Threshold:
+        <input type="number" name="other_student_threshold" id="other_student_threshold" value="95"/>
+        <small class="form-text text-muted">The similarity threshold with any other students' code.</small>
+    </label><br>
+
+    <label>
+        Starting Code Threshold:
+        <input type="number" name="starter_code_threshold" id="starter_code_threshold" value="95"/>
+        <small class="form-text text-muted">The similarity threshold with the starter code.</small>
+
+    </label><br>
+
+    <label>
+        Minimum File Length:
+        <input type="number" name="minimum_file_length" id="minimum_file_length" value="100"/>
+        <small class="form-text text-muted">The minimum file length required; all smaller files will be skipped.</small>
+
+    </label><br>
+
+    <button class="btn btn-outline-secondary" id="generate-report" type="submit">Generate report</button>
+    <small class="form-text text-muted">Might take a while.</small>
+    </form>
+
+    <h3>Existing Reports</h3>
+
+    {% for report in existing_reports %}
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title">
+                    {{ report.assignment.name }}
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text">
+                    <strong>Created:</strong> <span title="{{ report.date_created }}">{{ report.date_created|date_description }}</span><br>
+                    <strong>Started:</strong> <span title="{{ report.date_started }}">{{ report.date_started|date_description }}</span><br>
+                    <strong>Finished:</strong> <span title="{{ report.date_finished }}">{{ report.date_finished|date_description }}</span><br>
+                    <strong>User: </strong> <span>{{ report.owner.name() }} ({{ report.owner_id }})</span><br>
+                    <strong>Assignment: </strong> <a href="{{ url_for("courses.submissions_filter", criteria="assignment", search_key=report.assignment_id, course_id=course_id) }}"> {{ report.assignment.name }}</a> ({{ report.assignment.url }})<br>
+                    <strong>Status:</strong> {{ report.status }}<br>
+                    <strong>Message:</strong> {{ report.message }}<br>
+                    <a href="{{ url_for('api.report', report_id=report.id) }}/" class="btn btn-outline-secondary" target="_blank">View Report</a>
+                </p>
+            </div>
+        </div>
+        <br>
+    {% endfor %}
+
+{% endblock %}

@@ -2,7 +2,7 @@
 {% extends 'helpers/layout.html' %}
 
 {% block title %}
-Courses: Index
+Courses: Add
 {% endblock %}
 
 {% block statusbar %}
@@ -17,13 +17,18 @@ Courses: Index
 
 <h1>Add New Non-LMS Course</h1>
 
+    <a href="{{ url_for('courses.index') }}">Back to all courses</a>
+    
+    <p>
+    This form is for creating non-Canvas-enabled courses. If you want to create a Canvas-enabled course, please follow the <a href="{{ url_for('courses.add_canvas') }}">instructions to create a Canvas course.</a>
+    </p>
+
 <form method=post action="{{ url_for('courses.add') }}">
-  <dl>
-      <label for="name">{{ render_field(add_form.name) }}</label><br>
-      <label for="visibility">{{ render_field(add_form.visibility) }}</label><br>
-      <label for="term">{{ render_field(add_form.term) }}</label><br>
-  </dl>
-  <p><input type=submit value=Register>
+    {{ render_field(add_form.name) }}
+    {{ render_field(add_form.visibility) }}
+    {{ render_field(add_form.term) }}
+    {{ render_field(add_form.url) }}
+  <p><input type="submit" value="Add Course"></p>
 </form>
 
 {% endblock %}

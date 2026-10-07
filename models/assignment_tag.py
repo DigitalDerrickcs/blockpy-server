@@ -1,31 +1,38 @@
+from typing import Optional
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Column, String, Integer, ForeignKey, func, Text, Table
 
-from models import models
-from models.models import Base, datetime_to_string, string_to_datetime, db, optional_encoded_field
+import models
+from common.maybe import maybe_int
+from models.assignment_tag_membership import assignment_tag_membership
+from models.generics.models import db, ma
+from models.generics.base import Base
+from common.dates import datetime_to_string, string_to_datetime
+from common.databases import optional_encoded_field
 
 
 class AssignmentTag(Base):
     __tablename__ = 'assignment_tag'
-    name = Column(String(255), default="Blank Tag")
-    owner_id = Column(Integer(), ForeignKey('user.id'))
-    course_id = Column(Integer(), ForeignKey('course.id'))
+    name: Mapped[str] = mapped_column(String(255), default="Blank Tag")
+    owner_id: Mapped[int] = mapped_column(Integer(), ForeignKey('user.id'))
+    course_id: Mapped[int] = mapped_column(Integer(), ForeignKey('course.id'))
     KINDS = ['objective', 'topic', 'mistake', 'misconception', 'compliment']
-    kind = Column(String(255), default="objective")
-    description = Column(Text(), default="")
+    kind: Mapped[str] = mapped_column(String(255), default="objective")
+    description: Mapped[str] = mapped_column(Text(), default="")
     LEVELS = ['familiar', 'exposed', 'mastered', 'learning']
-    level = Column(String(255), default="familiar")
-    version = Column(String(255), default='0.0.1')
+    level: Mapped[str] = mapped_column(String(255), default="familiar")
+    version: Mapped[str] = mapped_column(String(255), default='0.0.1')
 
-    assignments = db.relationship("Assignment", secondary=models.assignment_tag_membership,
-                                  back_populates='tags')
-    owner = db.relationship("User")
-    course = db.relationship("Course")
+    assignments: Mapped[list["Assignment"]] = db.relationship(secondary=assignment_tag_membership,
+                                                              back_populates='tags')
+    owner: Mapped["User"] = db.relationship(back_populates="tags")
+    course: Mapped["Course"] = db.relationship(back_populates="tags")
+    reviews: Mapped[list["Review"]] = db.relationship(back_populates="tag")
 
     def __str__(self):
         return '{} Tag {}'.format(self.kind.title(), self.name)
 
     def encode_json(self, use_owner=True):
-        user = models.User.query.get(self.owner_id)
         return {
             '_schema_version': 2,
             'name': self.name,
@@ -57,7 +64,7 @@ class AssignmentTag(Base):
 
     @staticmethod
     def new(owner_id, course_id, name, kind, description, level):
-        assignment_tag = AssignmentTag(owner_id=owner_id, course_id=course_id,
+        assignment_tag = AssignmentTag(owner_id=owner_id, course_id=maybe_int(course_id),
                                        name=name, kind=kind, description=description,
                                        level=level)
         db.session.add(assignment_tag)
@@ -83,3 +90,9 @@ class AssignmentTag(Base):
                           AssignmentTag.level,
                           AssignmentTag.name)
                 .all())
+
+
+    def find_all_linked_resources(self) -> dict[str, list[Base]]:
+        resources = {
+        }
+        return resources

@@ -1,28 +1,36 @@
+from typing import Optional
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Column, String, Integer, ForeignKey, func, Text, Table, Boolean
 
-from models import models
-from models.models import Base, datetime_to_string, string_to_datetime, db, optional_encoded_field
+import models
+from common.maybe import maybe_int
+from models.generics.models import db, ma
+from models.generics.base import VersionedBase, Base
+from common.dates import datetime_to_string, string_to_datetime
+from common.databases import optional_encoded_field
 
 
-class SampleSubmission(Base):
+class SampleSubmission(VersionedBase):
     __tablename__ = 'sample_submission'
-    name = Column(String(255), default="Blank Submission")
-    status = Column(String(255), default='unknown')
+    name: Mapped[str] = mapped_column(String(255), default="Blank Submission")
+    status: Mapped[str] = mapped_column(String(255), default='unknown')
     STATUSES = ['unknown', 'passed', 'failed', 'error', 'skipped']
 
-    code = Column(Text(), default="")
-    extra_files = Column(Text(), default="")
-    score = Column(Integer(), default=0)
-    correct = Column(Boolean(), default=False)
-    output = Column(Text(), default="")
-    inputs = Column(Text(), default="")
-    feedback = Column(Text(), default="")
+    code: Mapped[str] = mapped_column(Text(), default="")
+    extra_files: Mapped[str] = mapped_column(Text(), default="")
+    score: Mapped[int] = mapped_column(Integer(), default=0)
+    correct: Mapped[bool] = mapped_column(Boolean(), default=False)
+    output: Mapped[str] = mapped_column(Text(), default="")
+    inputs: Mapped[str] = mapped_column(Text(), default="")
+    feedback: Mapped[str] = mapped_column(Text(), default="")
 
-    forked_id = Column(Integer(), ForeignKey('submission.id'))
-    forked_version = Column(Integer(), default=0)
-    owner_id = Column(Integer(), ForeignKey('user.id'))
-    assignment_id = Column(Integer(), ForeignKey('assignment.id'))
-    version = Column(Integer(), default=0)
+    forked_id: Mapped[Optional[int]] = mapped_column(Integer(), ForeignKey('submission.id'))
+    forked_version: Mapped[int] = mapped_column(Integer(), default=0)
+    owner_id: Mapped[int] = mapped_column(Integer(), ForeignKey('user.id'))
+    assignment_id: Mapped[int] = mapped_column(Integer(), ForeignKey('assignment.id'))
+    version: Mapped[int] = mapped_column(Integer(), default=0)
+
+    assignment: Mapped["Assignment"] = db.relationship(back_populates='sample_submissions')
 
     def __str__(self):
         return '{} Tag {}'.format(self.kind.title(), self.name)
@@ -67,7 +75,7 @@ class SampleSubmission(Base):
 
     @staticmethod
     def new(owner_id, course_id, name):
-        sample_submission = SampleSubmission(owner_id=owner_id, course_id=course_id, name=name)
+        sample_submission = SampleSubmission(owner_id=owner_id, course_id=maybe_int(course_id), name=name)
         db.session.add(sample_submission)
         db.session.commit()
         return sample_submission
@@ -82,3 +90,4 @@ class SampleSubmission(Base):
         return (SampleSubmission.query.filter_by(assignment_id=assignment_id)
                 .order_by(SampleSubmission.name)
                 .all())
+

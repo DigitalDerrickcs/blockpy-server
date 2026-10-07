@@ -1,0 +1,253 @@
+{% extends 'helpers/layout.html' %}
+
+{% block title %}
+    {{ page_title~" - " if page_title else "" }}{{ assignment.title() }} - BlockPy Textbook
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+    {% include 'blockpy/editor_includes.html' with context %}
+
+    <style>
+    .book-item {
+        cursor: pointer;
+        padding: 5px;
+    }
+
+    .book-item.disabled {
+        cursor: default;
+    }
+
+    @media (max-width: 768px) {
+        .textbook-navigation {
+            height: 300px;
+            overflow: auto;
+        }
+    }
+
+    .list-group-item.disabled.list-group-item-secondary {
+        color: #383d41;
+        background-color: #d6d8db;
+    }
+
+    </style>
+
+{% endblock %}
+
+{% block body %}
+
+    <span class='delete-on-load'>Loading! Please wait. If this doesn't load, and you are using Safari, then please stop using Safari!</span>
+
+    {% if lti %}
+    <script>
+    if (!frontend.checkCookies()) {
+        alert("Cookies appear to be disabled. You might need to disable an ad-blocker, adjust your security settings, or use a different browser (we recommend Chrome).");
+    }
+    </script>
+    {% endif %}
+
+    <!-- Main BlockPy canvas -->
+    <div id="blockpy-div" style='height:100%'></div>
+
+
+    <div class="row" id="textbook">
+
+    <!-- Textbook Navigation -->
+    <div class="col-md-4 col-lg-3 textbook-navigation">
+    {% macro textbook_item(item, indent) -%}
+        {% set item_style = ' style="padding-left: ' ~ (5+indent*8) ~ 'px"' %}
+        {% set class_style = (' ' if indent >= 1 else ' list-group-item-info ') if item.reading else ' disabled list-group-item-secondary ' %}
+        {% set data_bind = ' data-bind="' ~
+                        ('click: ()=>openReading(' ~ item.reading.id ~',\'' ~ item.reading.url~ '\',`'~ item.reading.name ~'`),' if item.reading else '') ~
+                        ('css: { active: ' ~ item.reading.id ~' === pageId() }' if item.reading else '') ~
+                        ('"') %}
+        {% if item.header -%}
+            <div class="list-group-item list-group-item-action book-item {{ class_style }}" {{ item_style|safe }} {{ data_bind|safe }}>{{ item.header }}</div>
+        {%- elif item.reading -%}
+            <div class="list-group-item list-group-item-action book-item {{ class_style }}" {{ item_style|safe }} {{ data_bind|safe }}>{{ item.reading.name }}</div>
+        {%- endif %}
+        {% for child in item.content -%}
+        {{ textbook_item(child, 1+indent) }}
+        {%- endfor %}
+    {%- endmacro %}
+
+    <div class="list-group">
+        {% for item in textbook['content'] %}
+        {{ textbook_item(item, 0) }}
+        {% endfor %}
+    </div>
+
+    </div>
+
+    <!-- Actual reader -->
+    <div class="col-md-8 col-lg-9">
+        <reader params="server: server,
+                        courseId: courseId,
+                        currentAssignmentId: pageId,
+                        assignmentGroupId: assignmentGroupId,
+                        isInstructor: isInstructor,
+                        markCorrect: markCorrect,
+                        asPreamble: true,
+                        user: user"></reader>
+    </div>
+    </div>
+
+
+
+    <script>
+        $(document).ready(function () {
+            // Load in Quiz interface
+            let loggedInUser = {{ user.encode_json()|tojson if user else "{id:null,email:null,first_name:null,last_name:null}" }};
+            server = new frontend.Server({{ course_id or "null" }}, {
+            }, {
+                users: [loggedInUser],
+                courses: []
+            });
+            function markCorrect() {};
+            const page = {{ page_id|tojson }} || null;
+            mainModel = {
+                courseId: {{  course_id or "null" }},
+                server: server,
+                user: loggedInUser,
+                isInstructor: {{  (role in ("owner", "grader")) | tojson }},
+                pageId: ko.observable(page),
+                assignmentType: ko.observable('reading'),
+                currentReadingAssignmentId: ko.observable(null),
+                assignmentGroupId: {{ (assignment_group_id or None)|tojson }},
+                markCorrect: markCorrect,
+                openReading: (id, url, name) => {
+                    updatePage(id, url, name);
+                    const pageUrl = new URL(window.location);
+                    pageUrl.searchParams.set('page', url);
+                    window.history.pushState({id, url, name}, '', pageUrl);
+                }
+            };
+            ko.applyBindings(mainModel, $("#textbook")[0]);
+
+            $(window).on('popstate', (e) => {
+                const data = e.originalEvent.state;
+                updatePage(data.id, data.url, data.name);
+            });
+
+            function updatePage(id, url, name) {
+                mainModel.pageId(id);
+                document.title = name + " - " + {{ assignment.title()|tojson }} + " - BlockPy Textbook";
+            }
+            
+            window.$blockPyUserData = {
+                "user.id": {{  user_id|tojson }},
+                {% if user %}
+                "user.name": {{ user.name()|tojson }},
+                {% endif %}
+                "user.role": {{ role|tojson }},
+                "user.course_id": {{ course_id|tojson }},
+                "access_token": window.accessToken,
+            };
+
+            // Load in BlockPy interface
+            editor = new blockpy.BlockPy({
+                // Configuration constants
+                'blockly.path': {{ url_for('static', filename='blockly/media/')|tojson }},
+                'attachment.point': '#blockpy-div',
+                "urls": {
+                    "importDatasets": {{ config['CORGIS_URL']|tojson }},
+                    'loadAssignment': {{ url_for('blockpy.load_assignment')|tojson }},
+                    'instructionsAssignmentSetup': {{ url_for('courses.making_problems')|tojson }},
+                    'forkAssignment': {{ url_for('blockpy.fork_assignment')|tojson }},
+                    'downloadFile': {{ url_for('blockpy.download_file', external=True)|tojson }},
+                    {% if submissions %}
+                        'saveAssignment': {{ url_for('blockpy.save_assignment')|tojson }},
+                        'loadHistory': {{ url_for('blockpy.load_history')|tojson }},
+                        'logEvent': {{ url_for('blockpy.log_event')|tojson }},
+                        'saveFile': {{ url_for('blockpy.save_file')|tojson }},
+                        'saveImage': {{ url_for('blockpy.save_image')|tojson }},
+                        'listUploadedFiles': {{ url_for('blockpy.list_files')|tojson }},
+                        'uploadFile': {{ url_for('blockpy.upload_file')|tojson }},
+                        'updateSubmission': {{ url_for('blockpy.update_submission')|tojson }},
+                        'updateSubmissionStatus': {{ url_for('blockpy.update_submission_status')|tojson }},
+                    {% endif %}
+                },
+                // User information
+                "user.id": {{  user_id|tojson }},
+                {% if user %}
+                    "user.name": {{ user.name()|tojson }},
+                {% endif %}
+                "user.role": {{ role|tojson }},
+                "user.course_id": {{ course_id|tojson }},
+                // Group Information
+                {% if assignment_group_id != None %}
+                    "user.group_id": {{ assignment_group_id|tojson }},
+                    'callback.success': markCorrect,
+                {% endif %}
+                "access_token": window.accessToken,
+
+                {% if role in ("owner", "grader") %}
+                    "display.instructor": true,
+                {% endif %}
+
+                {% if read_only %}
+                    "display.read_only": true,
+                {% endif %}
+
+                {% for name, value in request.args.items() %}
+                    {% if name.startswith('settings-') %}
+                        "{{ name[9:] }}": {{ value|tojson }},
+                    {% endif %}
+                {% endfor %}
+            });
+            editor.hide();
+
+            Sk.emojiProxy = (part) => `{{ url_for('static', filename='images/emoji/') }}${part.toLowerCase()}.svg`;
+
+            $MAIN_BLOCKPY_EDITOR = editor;
+
+            /* Passcode locking */
+            {% if passcode_protected %}
+            editor.requestPasscode();
+            {% endif %}
+
+            // Snippet that handles intelligent resizing
+            {% if not embed %}
+                function fixCanvasSize() {
+                    window.parent.postMessage(JSON.stringify({
+                        subject: "lti.frameResize",
+                        "height": $("body").height()+50
+                    }), '*')
+                }
+                try {
+                    fixCanvasSize();
+                    var resizeId;
+                    var ro = new ResizeObserver(entries => {
+                        for (let entry of entries) {
+                            if (entry.target === document.body) {
+                                clearTimeout(resizeId);
+                                resizeId = setTimeout(fixCanvasSize, 500);
+                            }
+                        /*const cr = entry.contentRect;
+                        console.log('Element:', entry.target);
+                        console.log(`Element size: ${cr.width}px x ${cr.height}px`);
+                        console.log(`Element padding: ${cr.top}px ; ${cr.left}px`);*/
+                        }
+                    });
+
+                    // Observe one or multiple elements
+                    ro.observe(document.body);
+
+                } catch(e) {
+                    console.error(e);
+                }
+            {% endif %}
+
+            // Remove the loading screen
+            $('.delete-on-load').remove();
+
+            // window.parent.postMessage(JSON.stringify({subject: "lti.fetchWindowSize"}), "*")
+            // window.addEventListener('message', function(event) { console.log(JSON.parse(event.data)); })
+        });
+    </script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+
+{% endblock %}

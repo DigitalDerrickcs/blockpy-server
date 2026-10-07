@@ -28,8 +28,10 @@ $(function() {
         users: [loggedInUser],
         courses: myCourses.concat(publicCourses)
     });
-    myCourses = myCourses.map((course) => server.courseStore.getInstance(course.id));
-    publicCourses = publicCourses.map((course) => server.courseStore.getInstance(course.id));
+    const noArchived = (course) => course.visibility !== 'archived';
+    myCourses = myCourses.map((course) => server.courseStore.getInstance(course.id)).filter(noArchived);
+    publicCourses = publicCourses.map((course) => server.courseStore.getInstance(course.id)).filter(noArchived);
+    publicCourses = publicCourses.filter((course) => !myCourses.find((c) => c.id === course.id));
 
     mainModel = {
         server: server,
@@ -51,11 +53,18 @@ $(function() {
 
 <h1>Courses</h1>
 
+    <div data-bind="visible: false">
+    <div class="spinner-loader"></div> Loading courses...
+    </div>
+
+
+<div>
+
     <!-- ko if: myCourses.length -->
 
     You are enrolled in the following courses:
 
-    <course-list params="server: server, courses: myCourses, user: user"></course-list>
+    <course-list params='server: server, courses: myCourses, user: user, label: "my"'></course-list>
 
     <!-- /ko -->
 
@@ -64,15 +73,17 @@ $(function() {
     <!-- /ko -->
 
 
-<h3> Public Courses</h3>
+<h3 class="mt-3"> Public Courses</h3>
 
-    The following courses are available to everyone:
+    The following additional courses are public to everyone:
 
-    <course-list params="server: server, courses: publicCourses, user: user"></course-list>
+    <course-list params='server: server, courses: publicCourses, user: user, label:"public"'></course-list>
 
 <h3>Create</h3>
 
 <a href="{{ url_for('courses.add') }}" class='btn btn-success'>Create new course</a><br><br>
 Or get instructions to <a href="{{ url_for('courses.add_canvas') }}">create new Canvas/LMS course</a>
+
+</div>
 
 {% endblock %}

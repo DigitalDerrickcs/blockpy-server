@@ -1,0 +1,85 @@
+{% extends 'helpers/layout.html' %}
+
+{% block title %}
+Quiz Submissions for {{ assignment.name }}
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+function MainModel() {
+    var self = this;
+}
+mainModel = new MainModel();
+$().ready(function() {
+    ko.applyBindings(mainModel);
+
+    $("#search-assignments").change(function(i, v) {
+        if (i.target.value != "") {
+            window.location.href = {{ url_for('courses.submissions_filter', course_id=course_id)|tojson }}+"?criteria=assignment&search_key="+i.target.value;
+        }
+    });
+
+    $("#search-students").change(function(i, v) {
+        if (i.target.value != "") {
+            window.location.href = {{ url_for('courses.submissions_filter', course_id=course_id)|tojson }}+"?criteria=student&search_key="+i.target.value;
+        }
+    });
+});
+
+    function giveMulligan(element, submission_id, amount) {
+        let url = "{{ url_for('quizzes.give_mulligan') }}?submission_id="+submission_id+"&amount="+amount;
+        element.style.backgroundColor = 'white';
+        fetch(url, {method: 'POST'}).then((response) => {
+            response.json().then((data) => {
+                element.parentNode.previousElementSibling.innerText = ""+data.count;
+                element.style.backgroundColor = 'transparent';
+            })
+        }).catch(() => {
+            element.style.backgroundColor = 'red';
+        }).finally(() => {
+        });
+    }
+
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+<h1>Quiz Submissions for {{ assignment.name }}</h1>
+
+<p>Back to <a href="{{ url_for('courses.course', course_id=course.id) }}">Course</a></p>
+
+    <table class="table table-condensed table-hover table-striped table-bordered">
+        <tr>
+            <th>Student</th>
+            <th>Score</th>
+            <th>Attempts</th>
+            <th>Mulligans</th>
+            <th>Give Mulligan</th>
+        </tr>
+    {% for submission, user, assignment in suas %}
+        {% set quiz = submission.code|json_load or {} %}
+        <tr>
+            <td>{{ user.name() }}</td>
+            <td>{{ submission.score }}</td>
+            <td>{{ quiz.get('attempt', {}).count }}</td>
+            <td>{{ quiz.get('attempt', {}).mulligans }}</td>
+            <td>
+                <button id="give-mulligan-{{ submission.id }}"
+                onclick="giveMulligan(this, {{ submission.id }}, 1)"
+                >Give Mulligan</button>
+                <button id="give-mulligan-{{ submission.id }}"
+                onclick="giveMulligan(this, {{ submission.id }}, -1)"
+                >Take Mulligan</button>
+            </td>
+        </tr>
+    {% endfor %}
+    </table>
+
+{% endblock %}

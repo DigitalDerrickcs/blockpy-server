@@ -29,10 +29,21 @@ $().ready(function() {
 
 <p>Back to <a href="{{ url_for('courses.course', course_id=course_id) }}">Course</a></p>
 
-<a href="{{ url_for('courses.add_users', course_id=course_id) }}" class='btn btn-outline-secondary'>Add Students</a><br>
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert-warning">
+            {% for message in messages %}
+                {{ message }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+<p>
+    <a href="{{ url_for('courses.add_users', course_id=course_id) }}" class='btn btn-outline-secondary'>Add Users</a><br>
+</p>
 
 <table class="table table-condensed table-hover">
-<caption>All users in course:</caption>
 <tbody>
 <tr>
     <th>Name</th>

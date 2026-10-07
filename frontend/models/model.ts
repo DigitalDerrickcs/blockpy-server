@@ -1,7 +1,8 @@
 import * as ko from 'knockout';
-import {TwoWayReadonlyMap} from "../components/plugins";
-import {ajax_get} from "../components/ajax";
-import {prettyPrintDateTime} from "../components/dates";
+import {TwoWayReadonlyMap} from "../services/plugins";
+import {ajax_get} from "../services/ajax";
+import {prettyPrintDateTime} from "../utilities/dates";
+import {Server} from "../services/server";
 
 export interface ModelJson {
     id: number;
@@ -62,16 +63,22 @@ export function dateCreatedSorter<J extends ModelJson, L extends Model<J>>(left:
 
 
 export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
-    private readonly data: Record<number, T>;
+    protected readonly data: Record<number, T>;
     protected courseId: number|null;
+    // When set, getAllAvailable() resolves immediately instead of hitting the server
+    protected allAvailable: T[] = null;
 
     private timer: number;
-    private delayedData: T[];
+    private readonly delayedData: ko.ObservableArray<T>;
+    isLoading: ko.PureComputed<boolean>;
 
-    constructor(courseId: number|null, initialIds: number[], initialData: J[]) {
+    protected readonly server: Server;
+
+    constructor(server: Server, courseId: number|null, initialIds: number[], initialData: J[]) {
         this.data = {};
+        this.server = server;
         this.courseId = courseId;
-        this.delayedData = [];
+        this.delayedData = ko.observableArray([]);
         this.timer = null;
         if (initialData !== undefined) {
             initialData.map((instance: J) => this.newInstance(instance));
@@ -79,6 +86,10 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
         if (initialIds !== undefined) {
             initialIds.map((id: number) => this.getInstance(id));
         }
+
+        this.isLoading = ko.pureComputed(() => {
+            return this.delayedData().length > 0;
+        }, this);
     }
 
     getInstance(id: number): T {
@@ -86,8 +97,13 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
             return this.data[id];
         } else {
             let delayedInstance = this.makeEmptyInstance(id);
-            this.delayLoadInstance(delayedInstance);
             this.data[id] = delayedInstance;
+            // A preloaded store already holds everything available, so an unknown
+            // id is simply unknown - never re-fetch. Invalid ids (null/NaN from
+            // half-initialized selections) must also never reach the server.
+            if (id != null && !isNaN(id) && this.allAvailable === null) {
+                this.delayLoadInstance(delayedInstance);
+            }
             return delayedInstance;
         }
     }
@@ -99,9 +115,9 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
     }
 
     queueFinishDelay() {
-        if (this.delayedData.length > 25) {
+        if (this.delayedData().length > 25) {
             this.finishDelayedLoads();
-        } else if (this.delayedData.length > 0) {
+        } else if (this.delayedData().length > 0) {
             this.timer = window.setTimeout(this.finishDelayedLoads.bind(this), 1000);
         }
     }
@@ -115,8 +131,24 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
         return Object.keys(this.data).map((key: number) => this.data[key]);
     }
 
-    getAllAvailable() {
-        let payload = this.getPayload();
+    /**
+     * Seed this store with the complete list of available models (e.g., data
+     * embedded in the page at render time), so getAllAvailable() resolves
+     * instantly instead of making a request.
+     */
+    preload(initialData: J[]): T[] {
+        const created = initialData.map((modelJson: J) => this.newInstance(modelJson));
+        this.allAvailable = this.cleanData(created);
+        return this.allAvailable;
+    }
+
+    getAllAvailable(payload?: object) {
+        if (this.allAvailable !== null) {
+            return Promise.resolve(this.allAvailable);
+        }
+        if (payload === undefined) {
+            payload = this.getPayload();
+        }
         let url = this.getUrl();
         return new Promise((resolve, reject) => {
             ajax_get(url, payload).then((data) => {
@@ -125,12 +157,16 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
                     let created = results.map( (modelJson: J) => {
                         return this.newInstance(modelJson);
                     });
-                    resolve(created);
+                    resolve(this.cleanData(created));
                 } else {
                     reject(data);
                 }
             });
         });
+    }
+
+    cleanData(models: T[]): T[] {
+        return models;
     }
 
     /**
@@ -158,30 +194,39 @@ export abstract class ModelStore<J extends ModelJson, T extends Model<J>> {
     abstract makeEmptyInstance(id: number): T;
     abstract GET_FIELD: string;
 
+    sortMethod(left: T, right: T): number {
+        return 0;
+    }
+
     finishDelayedLoads() {
         let payload = this.getPayload();
         let url = this.getUrl();
-        this.delayedData.length= 0;
+        const requested = this.getDelayedIds();
         return ajax_get(url, payload).then((data) => {
            if (data.success) {
                let results = data[this.GET_FIELD];
-               let created = results.map( (modelJson: J) => {
-                   this.data[modelJson.id].fromJson(modelJson);
-                   return modelJson.id;
+               results.forEach((modelJson: J) => {
+                   if (this.data[modelJson.id] !== undefined) {
+                       this.data[modelJson.id].fromJson(modelJson);
+                   }
                });
-               this.removeDelayedInstances(created);
            } else {
                console.error(data);
            }
+           // Clear everything that was asked about, including ids the server did
+           // not recognize - otherwise they would be re-requested every second.
+           this.removeDelayedInstances(requested);
+        }, () => {
+           this.removeDelayedInstances(requested);
         });
     }
 
     protected getDelayedIds(): number[] {
-        return this.delayedData.map((instance: T) => instance.id);
+        return this.delayedData().map((instance: T) => instance.id);
     }
 
     removeDelayedInstances(ids: number[]) {
-        this.delayedData = this.delayedData.filter((delayedInstance: T) => !ids.includes(delayedInstance.id));
+        this.delayedData(this.delayedData().filter((delayedInstance: T) => !ids.includes(delayedInstance.id)));
         this.queueFinishDelay();
     }
 }

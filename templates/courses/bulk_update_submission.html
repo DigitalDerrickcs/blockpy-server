@@ -1,0 +1,46 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Upload New Grades (JSON)
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+    {% endblock %}
+
+{% block body %}
+
+    <h1>Upload New Grades (JSON)</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert alert-warning">
+            {% for message in messages %}
+                {{ message|safe }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <form action="" method=post enctype=multipart/form-data>
+      <p><input type=file name=file>
+         <input type=submit value=Upload>
+    </form>
+    <p>Upload a JSON file with a list of submission objects. Each object must have the following fields:
+    <ul>
+    <li><code>submission_id</code>: The ID of the submission to update</li>
+    <li><code>score</code>: The new score for the submission (0..1)</li>
+    <li><code>correct</code>: The new correct status for the submission (True or False)</li>
+    </ul>
+    You can also have the optional field:
+    <ul>
+    <li><code>message</code>: A message relevant to the submission, that will be logged</li>
+    </ul>
+    </p>
+
+
+{% endblock %}

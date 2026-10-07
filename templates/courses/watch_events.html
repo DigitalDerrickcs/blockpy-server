@@ -12,19 +12,10 @@ Watch Events
 
 <script type='text/javascript'>
 
-    function getLocalStorage(key, defaultValue) {
-        let value = localStorage.getItem(key);
-        if (value === null) {
-            return defaultValue;
-        } else {
-            return value;
-        }
-    }
-
     $(function() {
         let loggedInUser = {{ user.encode_json()|tojson }};
-        let userIds = {{  request.values.get('user_ids')|tojson }} || getLocalStorage("BLOCKPY_SERVER_USERIDS", "");
-        let assignmentIds = {{  request.values.get('assignment_ids')|tojson }} || getLocalStorage("BLOCKPY_SERVER_ASSIGNMENTIDS", "first");
+        let userIds = {{  request.values.get('user_ids')|tojson }} || frontend.getLocalStorage("BLOCKPY_SERVER_USERIDS", "");
+        let assignmentIds = {{  request.values.get('assignment_ids')|tojson }} || frontend.getLocalStorage("BLOCKPY_SERVER_ASSIGNMENTIDS", "first");
         server = new frontend.Server({{ course_id|tojson }}, {
         }, {
             users: [loggedInUser]
@@ -44,7 +35,7 @@ Watch Events
 {% block body %}
 
     <h1>Watch Events</h1>
-    {{ navigation.navigate_course() }}
+    {{ navigation.navigate_course(course_id) }}
 
     <watcher params="server: server, courseId: pageCourseId, assignmentIds: assignmentIds, userIds: userIds"></watcher>
 

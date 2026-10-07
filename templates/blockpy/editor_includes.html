@@ -1,0 +1,112 @@
+
+{% assets "blockpy_css" %}
+    <link rel="stylesheet" href="{{ ASSET_URL }}"/>
+{% endassets %}
+
+{% assets "blockly_js" %}
+    <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+{% endassets %}
+
+{% assets "pedal_js" %}
+    <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+{% endassets %}
+
+{% assets "designer_js" %}
+    <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+{% endassets %}
+
+{% assets "drafter_js" %}
+    <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+{% endassets %}
+
+{% assets "blockpy_js" %}
+    <script type="text/javascript" src="{{ ASSET_URL }}"></script>
+{% endassets %}
+
+<style>
+    .embedded-data {
+        display: none;
+    }
+
+    .correct-submission {
+        background-color: #ded;
+    }
+
+    .incorrect-submission {
+        background-color: #edd;
+    }
+
+    .secret-submission {
+        background-color: #dde;
+    }
+
+    reader h4 {
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    reader blockquote {
+        padding-right: 20px;
+        font-style: italic;
+    }
+
+    reader img {
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+        max-height: 256px;
+    }
+
+    reader .reader-launch-blockpy button {
+        float: right;
+    }
+
+    .quizzer-question-mcq-horizontal {
+        display: flex;
+        justify-content: space-evenly;
+    }
+
+    /* Question Groups: a grid of horizontal multiple choice questions that share answers */
+    .quizzer-group-table {
+        table-layout: fixed;
+        width: 100%;
+        min-width: 480px;
+        margin-bottom: 0;
+    }
+    .quizzer-group-table th.quizzer-group-option,
+    .quizzer-group-table td.quizzer-group-option {
+        text-align: center;
+        vertical-align: middle;
+        font-size: 0.9em;
+        font-weight: normal;
+        padding: 0.25rem 0.125rem;
+    }
+    .quizzer-group-table thead th {
+        position: sticky;
+        top: 0;
+        background-color: white;
+        border-bottom: 1px solid #dee2e6;
+        z-index: 1;
+    }
+    .quizzer-group-table th.quizzer-group-statement {
+        font-weight: normal;
+        vertical-align: middle;
+    }
+    .quizzer-group-table .quizzer-group-body {
+        display: inline;
+    }
+    .quizzer-group-table th p,
+    .quizzer-group-table td p {
+        display: inline;
+        margin-bottom: 0;
+    }
+    .quizzer-group-table tbody tr.quizzer-group-row:nth-child(odd) {
+        background-color: rgba(0, 0, 0, 0.03);
+    }
+    .quizzer-group-table td.quizzer-group-option .form-check-input {
+        position: static;
+        margin: 0;
+    }
+
+</style>
+

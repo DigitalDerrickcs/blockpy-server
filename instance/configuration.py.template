@@ -1,0 +1,75 @@
+"""
+Production configuration template.
+
+First `cp instance/configuration.py.template to instance/configuration.py`
+Then modify with your own values!
+"""
+DEBUG = False
+TESTING = False
+
+SITE_NAME = "YOUR SITE NAME e.g., BlockPy @ Dev"
+SYS_ADMINS = ["YOUR EMAIL ADDRESSES HERE"]
+
+# Database settings
+DATABASE_USER = "username for the database, if not sqlite"
+DATABASE_PASS = "password for the database, if not sqlite"
+DATABASE_URL = "postgresql://{username}:{password}@localhost/blockpy"
+SQLALCHEMY_DATABASE_URI = DATABASE_URL.format(username=DATABASE_USER, password=DATABASE_PASS)
+
+# Email settings
+MAIL_SERVER = "INTERNAL MAIL SERVER"
+MAIL_PORT = 25
+MAIL_USE_SSL = False
+MAIL_USERNAME = "noreply+blockpy@YOURSCHOOL.edu"
+MAIL_PASSWORD = "YOUR MAIL PASSWORD"
+SECURITY_EMAIL_SENDER = "BlockPy Administrator @ SCHOOL"
+
+# Secrets
+# Secrets
+JWT_SECRET_KEY = "Generate a random JWT secret key"
+SECRET_KEY = "Generate a random Flask secret key"
+
+# Certificates
+CONSUMER_KEY = "Generate a random consumer key"
+CONSUMER_KEY_SECRET = "Generate a random consumer secret"
+CONSUMER_KEY_CERT = "/full/path/server.key"
+CONSUMER_KEY_PEM_FILE = "/full/path/server.pem"
+LOCAL_SSL_CERT = "/full/path/server.crt"
+LOCAL_SSL_KEY = "/full/path/server.key"
+
+# Password management
+SECURITY_PASSWORD_SALT = "Generatea a random salt"
+
+# External folders and files
+DATASETS_SOURCE_DIR = "/var/www/datasets/"
+COMPARE50_EXECUTABLE = "/var/www/compare50/venv/bin/python3 -m compare50"
+CORGIS_URL = "https://corgis-edu.github.io/corgis/datasets/"
+
+# Debug Toolbar settings
+DEBUG_TB_ENABLED = False
+DEBUG_TB_PROFILER_ENABLED = False
+
+# Admin User Information
+ADMIN_USERNAME = "yourusername"
+ADMIN_FIRST_NAME = "Your First Name"
+ADMIN_LAST_NAME = "Your Last Name"
+ADMIN_PASSWORD = "Your chosen password"
+ADMIN_EMAIL = "youremailaddress@provider.domain"
+
+# Task server
+TASK_DB_PASSWORD = "redis password"
+TASK_DB_URI = ""
+TASK_DB_SETTINGS = {
+  "password": TASK_DB_PASSWORD
+}
+TASK_QUEUE_STYLE = "redis"
+
+# Profiling
+PROFILE_RUNTIME = False
+
+# Canvas settings to prevent folks from logging in normally off the firewall
+# (they should use LTI)
+PREFERRED_LOGIN_URL = "https://udel.instructure.com/"
+# Shared secret for the LAPIS feedback ingestion endpoint
+# (must match the LAPIS repo's .env BLOCKPY_LAPIS_TOKEN).
+LAPIS_FEEDBACK_TOKEN = "change-me"

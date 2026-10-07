@@ -1,0 +1,90 @@
+/*
+ * Cadence feedback messages: a `.cadence-message` wrapping one Bootstrap card
+ * (`.card.cadence-section.cadence-<kind>`) per section, with Markdown bodies.
+ * Kept close to the site's plain Bootstrap look (white boxes, light grey
+ * borders, the body font size); the card basics are repeated here so the
+ * message still reads as boxes on pages without Bootstrap.
+ */
+.cadence-message .cadence-section {
+    margin-bottom: 1rem;
+    background: white;
+    border: 1px solid lightgrey;
+    border-radius: .25rem;
+}
+
+.cadence-message .cadence-section > .card-header {
+    padding: .5rem 1rem;
+    background: #f7f7f7;
+    border-bottom: 1px solid lightgrey;
+    font-size: 16px;
+}
+
+.cadence-message .cadence-section > .card-body {
+    padding: 1rem;
+}
+
+.cadence-message .card-body > :last-child {
+    margin-bottom: 0;
+}
+
+.cadence-message .card-body ul,
+.cadence-message .card-body ol {
+    padding-left: 1.5rem;
+}
+
+.cadence-message .card-body li + li {
+    margin-top: .25rem;
+}
+
+/*
+ * One exam topic (`.card.cadence-topic`, 2026-10-01): a box inside the exam
+ * section, titled with the topic and numbered ("Topic 2 of 3") when the message
+ * reports several. Faintly grey, every second one lighter (`.cadence-topic-alt`),
+ * so neighbouring topics read as separate boxes. Mirrors `style` in the course's
+ * content/layout.yaml (2026.10.1).
+ */
+.cadence-message .card-header {
+    background: #f1f3f5;
+}
+
+.cadence-message .card-body p:last-child,
+.cadence-message .card-body ul:last-child {
+    margin-bottom: 0;
+}
+
+.cadence-message ul {
+    padding-left: 1.4em;
+}
+
+.cadence-topic {
+    background: #f4f5f7;
+}
+
+.cadence-topic-alt {
+    background: #fcfcfd;
+}
+
+.cadence-topic:last-child {
+    margin-bottom: 0 !important;
+}
+
+.cadence-topic > .card-body {
+    padding: 0.9rem 1.1rem;
+}
+
+.cadence-topic-title {
+    font-size: 1.05em;
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid #e3e6ea;
+}
+
+.cadence-topic-title .badge {
+    font-weight: 600;
+    margin-right: 0.35rem;
+    vertical-align: 0.1em;
+}
+
+.cadence-topic ul {
+    margin-bottom: 0.75rem;
+}

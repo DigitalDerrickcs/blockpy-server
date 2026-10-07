@@ -50,21 +50,21 @@
 
         function MainModel() {
             var self = this;
-            var filteredCourse = localStorage.getItem('filteredCourse');
+            var filteredCourse = frontend.getLocalStorage('filteredCourse');
             self.onServer = ko.observable(false);
-            var hiddenGroups = localStorage.getItem("hiddenGroups");
+            var hiddenGroups = frontend.getLocalStorage("hiddenGroups");
             if (hiddenGroups === null) {
-                localStorage.setItem("hiddenGroups", "[]");
+                frontend.setLocalStorage("hiddenGroups", "[]");
                 self.hiddenGroups = ko.observableArray([]);
             } else {
                 self.hiddenGroups = ko.observableArray(JSON.parse(hiddenGroups));
             }
             self.hiddenGroups.subscribe(function (newValue) {
-                localStorage.setItem("hiddenGroups", JSON.stringify(self.hiddenGroups()));
+                frontend.setLocalStorage("hiddenGroups", JSON.stringify(self.hiddenGroups()));
             });
             self.filteredCourse = ko.observable(filteredCourse == null ? -1 : filteredCourse);
             self.filteredCourse.subscribe(function (newValue) {
-                localStorage.setItem('filteredCourse', newValue);
+                frontend.setLocalStorage('filteredCourse', newValue);
                 self.createAssignmentCourse(newValue);
                 self.createGroupCourse(newValue);
             });

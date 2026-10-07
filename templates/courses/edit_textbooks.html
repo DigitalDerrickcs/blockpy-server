@@ -1,0 +1,83 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Edit Textbook Settings
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+</script>
+
+
+<script type="text/javascript">
+
+</script>
+
+{% endblock %}
+
+{% block body %}
+
+    <h1>Edit Textbooks</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert-warning">
+            {% for message in messages %}
+                {{ message }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This page allows you to edit the textbooks for the current course. You probably
+        only want to set one textbook.
+    </p>
+
+    <h3>Current Textbooks</h3>
+    {% if current_textbooks %}
+        <ul>
+    {% for textbook in current_textbooks %}
+        <li>
+            {% if textbook.course_id == course_id %}
+                {{ textbook.name }} (owned by course)
+            {% else %}
+            <form action="" method="post">
+                <input type="hidden" name="textbook_url" value="{{ textbook.url }}">
+                <input type="hidden" name="action" value="remove">
+                <input type="submit" value="Remove {{ textbook.name }}" class="btn btn-danger m-2">
+            </form>
+            {% endif %}
+        </li>
+    {% endfor %}
+        </ul>
+    {% else %}
+        There are currently no textbooks in this course.
+    {% endif %}
+
+    <h3>Available Textbooks</h3>
+    {% if all_possible_textbooks %}
+        <ul>
+    {% for textbook in all_possible_textbooks %}
+        <li>
+            <form action="" method="post">
+                <input type="hidden" name="textbook_url" value="{{ textbook.url }}">
+                <input type="hidden" name="action" value="add">
+                <input type="submit" value="Add {{ textbook.name }}" class="btn btn-success m-2">
+            </form>
+        </li>
+    {% endfor %}
+        </ul>
+    {% else %}
+        There are currently no textbooks in the system.
+    {% endif %}
+
+
+{% endblock %}

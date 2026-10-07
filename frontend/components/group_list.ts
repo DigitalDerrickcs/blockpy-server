@@ -1,6 +1,6 @@
 import * as ko from 'knockout';
 import {AssignmentGroup, AssignmentGroupJson} from "../models/assignment_group";
-import {ajax_get} from "./ajax";
+import {ajax_get} from "../services/ajax";
 
 export class GroupList {
     groups: KnockoutObservableArray<AssignmentGroup>;

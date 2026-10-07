@@ -8,6 +8,9 @@ Dashboard
 {% endblock %}
 
 {% block extrahead %}
+
+    <script>window.accessToken = {{ (g.access_token or "")|tojson }}</script>
+
     <script>
     URLS_UPDATE_SUBMISSION = "{{ url_for('blockpy.update_submission') }}";
     USER_DATA = {{ users|tojson }};
@@ -20,7 +23,8 @@ Dashboard
 
     const GRADING_LOCAL_STORAGE_ITEM_USERSETS = "Grading-Usersets";
     function UserSetModel() {
-        let sets = localStorage.getItem(GRADING_LOCAL_STORAGE_ITEM_USERSETS);
+        // TODO: Refactor this to do the appropriate thing
+        let sets = frontend.getLocalStorage(GRADING_LOCAL_STORAGE_ITEM_USERSETS);
         if (sets === null) {
             sets = [{"name": "All students", "default": true, "emails": ""}];
         } else {
@@ -39,7 +43,7 @@ Dashboard
             this.editorVisible(true);
         }.bind(this);
         this.saveSet = function() {
-            localStorage.setItem(GRADING_LOCAL_STORAGE_ITEM_USERSETS,
+            frontend.setLocalStorage(GRADING_LOCAL_STORAGE_ITEM_USERSETS,
                 JSON.stringify(this.sets().map(function(set) {return {
                     "name": set.name(),
                     "default": set.default(),
@@ -93,16 +97,134 @@ Dashboard
     $(document).ready(function() {
         grading = new GradingModel();
         ko.applyBindings(grading);
+
+        if (inIframe()) {
+            $("#relaunch-login button").click(()=>relaunchInWindow());
+            $("#relaunch-login").show();
+
+            {% for textbook in textbooks %}
+                $("#load-textbook-{{ textbook.url }}").click((event) => {
+                    relaunchInWindow({{ url_for('assignments.load', _external=True, assignment_url=textbook.url,course_id=g.course.id,
+                    grade_mode='textbook')|tojson }});
+                    event.preventDefault();
+                });
+            {% endfor %}
+            $("#launch-scratchpad").click((event) => {
+                relaunchInWindow({{ url_for('assignments.load', _external=True, course_id=g.course.id)|tojson }});
+                    event.preventDefault();
+            })
+            $("#launch-submissions-filter").click((event) => {
+                relaunchInWindow({{ url_for('assignments.load', _external=True, course_id=g.course.id, grade_mode='filter', embed="false")|tojson }});
+                    event.preventDefault();
+            })
+            $("#launch-course-analytics").click((event) => {
+                relaunchInWindow({{ url_for('assignments.load', _external=True, course_id=g.course.id, grade_mode='analytics', embed="false")|tojson }});
+                    event.preventDefault();
+            })
+        $("#launch-submissions-watch").click((event) => {
+                relaunchInWindow({{ url_for('assignments.load', _external=True, course_id=g.course.id, grade_mode='watch', embed="false")|tojson }});
+                    event.preventDefault();
+            })
+
+        }
     });
     </script>
-    <script src="{{  url_for('static', filename='libs/blockpy_server/blockpy_server.js') }}"></script>
 {% endblock %}
 
 {% block body %}
 
     <h1>Grader Dashboard</h1>
 
-    <p>Welcome to your dashboard! This feature is in beta. Expect issues!</p>
+    <p>
+        Hello {{ g.user.name() }} ({{ g.user.id }}), you are in "{{ g.course.name }}" ({{g.course.id}}).
+    </p><p>
+        You are a grader! Welcome to your dashboard!
+    </p>
+
+    <div id="relaunch-login" style="display:none;">
+        If third party cookies are not enabled correctly in your browser, then you may need to relaunch this page.
+        Click this button to relaunch this outside of Canvas (should log you in with cookies).
+        <button class="btn btn-primary">Relaunch</button>
+    </div>
+
+    <div class="row">
+
+    <!-- Textbooks -->
+    {% if textbooks %}
+    <div class="col-sm-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Textbook{{ 's' if textbooks|length > 1 else '' }}</h5>
+                <p class="card-text">See an overview of the entire textbook, including later chapters!.</p>
+                {% for textbook in textbooks %}
+                <a target=_blank href="{{ url_for('assignments.load_textbook', path=textbook.url, course_id=g.course.id, embed=True) }}"
+                   class='btn btn-primary' id="load-textbook-{{ textbook.url }}">Read {{ textbook.name }}</a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="col-sm-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">BlockPy Scratchpad</h5>
+                <p class="card-text">Need a place to quickly run some BlockPy code and experiment? Get a reusable scratchpad!</p>
+                <a target=_blank href="{{ {"force_default_assignment":"true"}|modify_query }}" class="btn btn-primary" id="launch-scratchpad">BlockPy Scratchpad</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">View Submissions</h5>
+                <p class="card-text">Want to look at the latest code for anyone in the course?</p>
+                <a target=_blank href="{{ url_for('courses.submissions_filter', course_id=course_id) }}" class="btn btn-primary"
+                    id="launch-submissions-filter">View Student Submissions</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Course Analytics</h5>
+                <p class="card-text">Charts and statistics about how your students are doing.</p>
+                <a target=_blank href="{{ url_for('courses.course_analytics', course_id=course_id) }}" class="btn btn-primary"
+                    id="launch-course-analytics">Course Analytics</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">View Submissions (Experimental)</h5>
+                <p class="card-text">A different interface for viewing students' submissions, with some fancier features (but also a little harder to get an overview)</p>
+                <a target=_blank href="{{ url_for('courses.watch_events', course_id=course_id) }}" class="btn btn-primary"
+                    id="launch-submissions-watch">View Submissions (Experimental)</a>
+            </div>
+        </div>
+    </div>
+
+    {% if is_instructor %}
+    <div class="col-sm-6">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Edit Course Settings</h5>
+                <p class="card-text">The main instructor interface for editing a course. Be careful using this, only use it if you know what you are doing!</p>
+                <a target=_blank href="{{ url_for('courses.course', course_id=course_id) }}" class="btn btn-primary">Edit Course Settings</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+
+    </div>
+
+    {% if pending_review %}
+    <h2>Ungraded Submission Requiring Human Review</h2>
 
     <p>The following submissions are ready for review</p>
 
@@ -156,25 +278,6 @@ Dashboard
     {% endfor %}
     </tbody>
     </table>
-
-    <p>You are {{ g.user.name() }} ({{ g.user.id }}), currently in "{{ g.course.name }}" ({{g.course.id}})</p>
-
-    {% if is_instructor %}
-        <h4>Instructor Tools</h4>
-        {% if g.course.endpoint != session.get("lis_outcome_service_url", "") %}
-            <script>$(document).ready(function() {
-                $("#update-course-outcome-url").click(function() {
-                    $.post("{{ url_for("courses.fix_course_outcome_url") }}",
-                        {
-                            "new_url": {{ session.get("lis_outcome_service_url", "")|tojson }}
-                        });
-                });
-            });</script>
-        <button type="button" class="btn btn-info" id="update-course-outcome-url">
-            Update LTI course outcome URL </button>
-        to <code>{{ session.get("lis_outcome_service_url", "") }}</code><br>
-            <small>Use this button if your initial course outcome URL is not correct.</small>
-        {% endif %}
     {% endif %}
 
 {% endblock %}

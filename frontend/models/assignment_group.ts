@@ -1,7 +1,7 @@
 import * as ko from 'knockout';
 import {Model, ModelJson, ModelStore} from "./model";
-import {capitalize, TwoWayReadonlyMap} from "../components/plugins";
-import {ajax_get} from "../components/ajax";
+import {capitalize, TwoWayReadonlyMap} from "../services/plugins";
+import {ajax_get} from "../services/ajax";
 
 export interface AssignmentGroupJson extends ModelJson {
     id: number;

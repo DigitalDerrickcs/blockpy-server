@@ -1,5 +1,5 @@
 {% macro assignment_group_header(group, assignment_id, embed, page_type) %}
-    {% set sorted_group = group %}
+    {% set sorted_group = group|rejectattr('0.subordinate')|list %}
 
     {% set ns = namespace(found=false) %}
     {% set ns.any_secretive = False %}
@@ -9,150 +9,172 @@
 
     <style>
 
-        #assignment-selector-div .row {
+        .assignment-selector-div .row {
             border: 1px solid #faebcc;
             border-bottom: 0;
             background-color: #fcf8e3;
             margin-right: 0px
         }
 
-        #assignment-selector {
+        .assignment-selector {
             overflow-y: auto;
         }
 
     </style>
 
     <script>
+
+        var URL_MAP = {
+            {%- for assignment, submission in sorted_group %}
+            {{ assignment.id }}: "{{ url_for(page_type,
+                                        assignment_group_id= request.args.get("assignment_group_id"),
+                                        assignment_group_url= request.args.get("assignment_group_url"),
+                                        assignment_id=assignment.id,
+                                        embed=embed)|safe }}",
+            {%- endfor %}
+        };
+        var INDICES = [{%- for assignment, submission in sorted_group %}{{ assignment.id }},{%- endfor %}];
+        var FIRST_ID = {{ sorted_group[0][0].id }};
+        var LAST_ID = {{ sorted_group[-1][0].id }};
+
+        function loadNavigation() {
+            var completed = {
+                {%- for assignment, submission in sorted_group %}
+                    {{ assignment.id }}: {%- if ns.any_secretive -%}
+                                            "secret-submission"
+                                        {%- elif submission.correct -%}
+                                            "correct-submission"
+                                        {%- else -%}
+                                            "incorrect-submission"
+                                        {%- endif -%},
+                {%- endfor %}
+            };
+            var currentId = {{ assignment_id }};
+
+            function updateUI(id) {
+                $(".assignment-selector > option[value='"+id+"']").prop("selected", true);
+                $(".assignment-selector-first").attr("disabled", id === FIRST_ID);
+                $(".assignment-selector-back").attr("disabled", id === FIRST_ID);
+                $(".assignment-selector-next").attr("disabled", id === LAST_ID);
+                $(".assignment-selector-last").attr("disabled", id === LAST_ID);
+            }
+            updateUI(currentId);
+            var loadNewAssignment = function (id) {
+                currentId = id;
+                updateUI(id);
+                if (typeof altAssignmentChangingFunction == "undefined") {
+                    document.location.href = URL_MAP[id];
+                    $(".row").append($("<span>~~~ The next problem is loading! Please wait</span>"));
+                } else {
+                    altAssignmentChangingFunction(id);
+                }
+            }
+            $(".assignment-selector").off().change(function (event) {
+                var id = parseInt($(event.target).val(), 10);
+                console.log(id);
+                loadNewAssignment(id);
+            });
+            $(".assignment-selector-first").off().click(function (event) {
+                loadNewAssignment(FIRST_ID);
+            });
+            $(".assignment-selector-last").off().click(function (event) {
+                loadNewAssignment(LAST_ID);
+            });
+            $(".assignment-selector-next").off().click(function (event) {
+                var index = INDICES.indexOf(currentId);
+                var next = INDICES[index+1] || LAST_ID;
+                loadNewAssignment(next);
+            });
+            $(".assignment-selector-back").off().click(function (event) {
+                var index = INDICES.indexOf(currentId);
+                var back = INDICES[index-1] || FIRST_ID;
+                loadNewAssignment(back);
+            });
+
+            // click to expand
+            function setAssignmentSelectorExpansion(state) {
+                if (state) {
+                    var length = Math.min(5, $('.assignment-selector option').length/2);
+                    $(".assignment-selector").attr("size", length.toString());
+                    $(".assignment-selector").css("vertical-align", "top");
+                } else {
+                    $(".assignment-selector").attr("size", "1");
+                    $(".assignment-selector").css("vertical-align", "middle");
+                }
+            }
+
+            var hasLocalStorage;
+            try {
+                localStorage;
+                hasLocalStorage = true;
+            } catch (exception) {
+                hasLocalStorage = false;
+            }
+
+            var state = hasLocalStorage && localStorage.getItem("blockpy_assignmentSelectorExpanded") === "true";
+            setAssignmentSelectorExpansion(state);
+            $(".completion-box").click(function () {
+                state = !(hasLocalStorage && localStorage.getItem("blockpy_assignmentSelectorExpanded") === "true");
+                setAssignmentSelectorExpansion(state);
+                hasLocalStorage && localStorage.setItem("blockpy_assignmentSelectorExpanded", (state).toString());
+            });
+        }
+
+
         /*
          * Increment completed counter by 1
          * Disable next/first/etc. butttons when at end
          * Display message when completed all
          */
         function markCorrect(assignmentId) {
-            var opt = $("#assignment-selector option[value='" + assignmentId + "']");
+            var opt = $(".assignment-selector option[value='" + assignmentId + "']");
             if (!opt.hasClass("correct-submission")) {
                 {% if not ns.any_secretive %}
                     opt.html("&#10004; " + opt.html());
                     opt.removeClass("incorrect-submission");
                     opt.addClass("correct-submission");
-                    $("#assignment-selector-next").removeClass("btn-outline-secondary").addClass("btn-success");
-                    $('#completion-rate').html(parseInt($('#completion-rate').html(), 10) + 1);
+                    $(".assignment-selector-next").removeClass("btn-outline-secondary").addClass("btn-success");
+                    $('.completion-rate').html(parseInt($('.completion-rate').html(), 10) + 1);
                 {% else %}
-                    $('#completion-rate').html("??");
+                    $('.completion-rate').html("??");
                 {% endif %}
             }
         }
 
-        var URL_MAP = {
-        {% for assignment, submission in sorted_group -%}
-            {{ assignment.id }}: "{{ url_for(page_type, 
-                                        assignment_group_id= request.args.get("assignment_group_id"),
-                                        assignment_group_url= request.args.get("assignment_group_url"),
-                                        assignment_id=assignment.id,
-                                        embed=embed)|safe }}",
-        {%- endfor %}
-        }
-        ;
-
-        function loadNavigation() {
-            var loadNewAssignment = function () {
-                var id = $("#assignment-selector").val();
-                if (typeof altAssignmentChangingFunction == "undefined") {
-                    document.location.href = URL_MAP[id];
-                } else {
-                    altAssignmentChangingFunction(id);
-                }
-            }
-            $("#assignment-selector").change(function () {
-                loadNewAssignment();
-            });
-            $("#assignment-selector-first").click(function () {
-                var original = $("#assignment-selector").val();
-                if (original != {{ sorted_group[0][0].id }}) {
-                    $("#assignment-selector").val({{ sorted_group[0][0].id }});
-                    loadNewAssignment();
-                }
-            });
-            $("#assignment-selector-last").click(function () {
-                var original = $("#assignment-selector").val();
-                if (original != {{ sorted_group[-1][0].id }}) {
-                    $("#assignment-selector").val({{ sorted_group[-1][0].id }});
-                    loadNewAssignment();
-                }
-            });
-            $("#assignment-selector-next").click(function () {
-                var current = $("#assignment-selector > option:selected");
-                var next = current.next('option');
-                if (next.length) {
-                    current.prop("selected", false);
-                    next.prop("selected", true);
-                    loadNewAssignment();
-                }
-            });
-            $("#assignment-selector-back").click(function () {
-                var current = $("#assignment-selector > option:selected");
-                var prev = current.prev('option');
-                if (prev.length) {
-                    current.prop("selected", false);
-                    prev.prop("selected", true);
-                    loadNewAssignment();
-                }
-            });
-
-            // click to expand
-            function setAssignmentSelectorExpansion(state) {
-                if (state) {
-                    var length = Math.min(5, $('#assignment-selector option').length);
-                    $("#assignment-selector").attr("size", length.toString());
-                    $("#assignment-selector").css("vertical-align", "top");
-                } else {
-                    $("#assignment-selector").attr("size", "1");
-                    $("#assignment-selector").css("vertical-align", "middle");
-                }
-            }
-
-            var state = localStorage.getItem("blockpy_assignmentSelectorExpanded") === "true";
-            setAssignmentSelectorExpansion(state);
-            $("#completion-box").click(function () {
-                state = !(localStorage.getItem("blockpy_assignmentSelectorExpanded") === "true");
-                setAssignmentSelectorExpansion(state);
-                localStorage.setItem("blockpy_assignmentSelectorExpanded", (state).toString());
-            });
-        }
     </script>
 
-    <div id='assignment-selector-div'>
+    <div class='assignment-selector-div'>
         <div class='row'>
             <div class='col-md-12 mt-1 mb-1 ml-2 mr-2'>
                 <div class='center-block'>
-                    <button type="button" class='btn btn-outline-secondary btn-sm mr-1' id='assignment-selector-first'>
+                    <button type="button" class='btn btn-outline-secondary btn-sm mr-1 assignment-selector-first'>
                         <span class="fas fa-step-backward" aria-hidden="true"></span>
                         First
                     </button>
 
-                    <button type="button" class='btn btn-outline-secondary btn-sm' id='assignment-selector-back'>
+                    <button type="button" class='btn btn-outline-secondary btn-sm assignment-selector-back'>
                         <span class="fas fa-chevron-left" aria-hidden="true"></span>
                         Back
                     </button>
 
-                    <select id='assignment-selector'>
+                    <select class='assignment-selector m-1'>
                         {% for assignment, submission in sorted_group %}
                             <option value='{{ assignment.id }}'
                                     {% if assignment.id == assignment_id|int %}selected{% endif %}
                                     class='
-                    {%- if ns.any_secretive -%}
-                        secret-submission
-                    {%- elif submission.correct -%}
-                        correct-submission
-                    {%- else -%}
-                        incorrect-submission
-                    {%- endif -%}'>
+                                        {%- if ns.any_secretive -%}
+                                            secret-submission
+                                        {%- elif submission.correct -%}
+                                            correct-submission
+                                        {%- else -%}
+                                            incorrect-submission
+                                        {%- endif -%}'>
                                 {% if submission.correct and not ns.any_secretive %}
                                     &#10004; {% endif %} {{ assignment.name }}
                             </option>
                         {% endfor %}
                     </select>
-                    <span id='completion-box'>(<span id='completion-rate'>
+                    <span class='completion-box m-1'>(<span class='completion-rate'>
                 {%- if not ns.any_secretive -%}
                     {{- (sorted_group|map(attribute='1.correct')|sum) -}}
                 {%- else -%}
@@ -161,13 +183,17 @@
             </span>/{{ (sorted_group|length) }} completed)
         </span>
 
-                    <button type="button" class='btn btn-outline-secondary btn-sm' id='assignment-selector-next'>
+                    <button type="button" class='btn btn-outline-secondary btn-sm assignment-selector-next'>
                         Next <span class="fas fa-chevron-right" aria-hidden="true"></span>
                     </button>
 
-                    <button type="button" class='btn btn-outline-secondary btn-sm' id='assignment-selector-last'>
+                    <button type="button" class='btn btn-outline-secondary btn-sm assignment-selector-last'>
                         Last <span class="fas fa-step-forward" aria-hidden="true"></span>
                     </button>
+                    <span class="float-right text-muted assignment-selector-countdown"
+                          title="Time remaining (if a time limit is set)"></span>
+                    <span class="float-right text-muted assignment-selector-clock"
+                          title="Estimate time spent (click to get total time spent across all sessions)">0:00</span>
                 </div>
             </div>
         </div>
@@ -175,7 +201,7 @@
     {% for assignment, submission in sorted_group %}
     {% endfor %}
     <script>
-        test = $("#assignment-selector-div").html();
+        FULL_SELECTOR_DIV = $(".assignment-selector-div").html();
     </script>
 
 {% endmacro %}

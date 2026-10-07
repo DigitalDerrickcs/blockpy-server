@@ -1,7 +1,7 @@
 {% extends 'helpers/layout.html' %}
 
 {% block title %}
-Courses: Making Problems
+    Courses: Making Problems
 {% endblock %}
 
 {% block statusbar %}
@@ -9,226 +9,438 @@ Courses: Making Problems
 
 {% block extracss %}
 
-.highlight pre, .linenodiv pre {
+    .highlight pre, .linenodiv pre {
     background-color: #FEFEFE;
-}
+    }
 
 {% endblock %}
 
 {% block body %}
-
-<h1>Making Assignments</h1>
-
-<p>
-Here is the current workflow for creating new BlockPy problems with feedback.
-</p>
-
-<p>
-<strong>Step 0:</strong> Make sure you have <a href="{{ url_for('courses.add_canvas') }}">created a new Canvas course</a>. Presently, BlockPy is not supporting any other LMS. It is possible that all of the following will work for Moodle, but it has not been tested extensively.
-</p>
-
-<p>
-<strong>Step 1:</strong> Visit the course on Canvas and click the Assignments tab.
-</p>
-
-<img src="{{ url_for('static', filename='images/instructions/choose_assignments.png') }}" class='center-block' alt='Screenshot of canvas navigation menu with assignments button circled'/><br>
-
-<p>
-<strong>Step 2:</strong> Click the [+Assignment] button in the top right corner.
-</p>
-
-<img src="{{ url_for('static', filename='images/instructions/add_assignment.png') }}" class='center-block' alt='Screenshot of Canvas Assignment screen with an arrow pointing to the +Assignment button'/><br>
-
-<p>
-<strong>Step 3:</strong> Set the assignment type to External Tool and click [Find].
-</p>
-
-<img src="{{ url_for('static', filename='images/instructions/external_tool.png') }}" class='center-block' alt='Screenshot of Edit Assignment screen on Canvas with arrwos pointing to the External Tool dropdown and the Find button'/><br>
-
-<p>
-<strong>Step 4:</strong> Click BlockPy.
-</p>
-
-<img src="{{ url_for('static', filename='images/instructions/choose_blockpy.png') }}" class='center-block' alt='Screenshot of Canvas Configure External Tool Dialog with an arrow pointing at the BlockPy Version X option'/><br>
-
-<p>
-<strong>Step 5:</strong> Create BlockPy assignments and assignment groups with the desired number of problems. We recommend keeping the number of problems in a group at 5 or below, for performance and student cognitive load. Note that this system is not how you configure the question (e.g., its feedback), but just how you create the empty problem and give it a name.
-</p>
-
-<img src="{{ url_for('static', filename='images/instructions/edit_assignments.png') }}" class='center-block' alt='Screenshot of BlockPy menu for selecting assignments.'/><br>
-
-<p>
-<strong>Step 6:</strong> When you have created your desired group or assignment, click Select to attach it to the Canvas assignment. Click Select again to close the menu, and then finish setting any other options for the assignment in canvas (e.g., number of points, due date, assignment name). Save the assignment.
-</p>
-
-<img src="{{ url_for('static', filename='images/instructions/blockpy_instructor.png') }}" class='center-block' alt='Screenshot of a BlockPy problem in the editor interface'/><br>
-
-<p>
-<strong>Step 7:</strong> When you visit the Assignment as an instructor, you will now be able to edit its actual BlockPy settings. The [Settings] button allows you to control the name, introduction, and other settings.
-</p>
-
-<img src="{{ url_for('static', filename='images/instructions/blockpy_settings.png') }}" class='center-block' alt='Screenshot of the Assignment Settings modal dialog in the BlockPy interface'/><br>
-
-<p>
-<strong>Step 8:</strong> The on_run tab is the code that is executed to provide the student feedback. A number of libraries, including Pedal, are preloaded for your convenience. To get more documentation on these methods and to see examples, check out the <a href='https://github.com/acbart/pedal' target=_blank>Pedal Github repo</a>. 
-</p>
-
-<h3>Basic Feedback Functions</h3>
-
-<ul>
-    <li><code>gently(message)</code>: Displays the given HTML message string to the student. The first gently called is the only one shown.</li>
-    <li><code>explain(message, priority)</code>: Displays the given HTML message string to the student, but with the given priority. The priority should be a Pedal execution phase. To preempt the syntax verifier, for instance, use <code>'verifier'</code>. To preempt runtime errors, use <code>'student'</code>. This is more advanced than <code>gently</code>, so you usually want to just gently explain things.</li>
-</ul>
-
-<h3>Basic Student Information Retreival</h3>
-
-<ul>
-    <li><code>get_output()</code>: Gets the current output from the user as a list of strings.</li>
-    <li><code>get_program()</code>: Gets the current students' code as a string.</li>
-    <li><code>student.data</code>: Gets the students' final execution state as a dictionary (note that this is not a function). This allows you to do things like <code>'my_variable' in student.data</code> or <code>student.data['my_variable']</code>.
-</ul>
-
-<h3>Basic CAIT Analysis</h3>
-
-CAIT allows you to traverse the students' code as an AST and make assertions.
-
-<ul>
-    <li><code>parse_program()</code>: Gets the students' code as a traversable AST. Commonly, we then assign this to a variable as follows: <code>ast = parse_program()</code>. </li>
-    <li><code>ast.find_all(ast_element)</code>: Consumes an AST element as a string (e.g., <code>'For'</code> or <code>'FunctionDef'</code>) and produces a list of all the traversable AST elements that match.
-</ul>
-
-<h3>Some useful toolkit functions</h3>
-
-<p>
-You will need to import some libraries to use these:
-</p>
-<p>
-<code>from pedal.toolkit.functions import *</code>
-</p>
-
-<ul>
-    <li><code>match_signature(function_name, number_of_arguments)</code>: Consumes the expected name of the function as a string, with the expected number_of_arguments as an integer. Returns the functiond definition (as a traversable AST) if the function is found, otherwise displays a message explaining to the user that they have not defined the function correctly.
-    <li><code>unit_test(function_name, tests)</code>: Consumes the expected name of the function and then the tests to run on the function. The tests should be a sequence of tuples, where each tuple should be the arguments followed by the final return value.
-</ul>
-
-<h3>Examples</h3>
-
-<h4>Example 1 (Trivial)</h4>
-
-<p>
-Print the string "Hello World!" exactly as written (same capitalization and punctuation).
-</p>
-
-{% filter highlight_python_code %}
-if "Hello World!" in get_output():
-    set_success()
-elif get_output():
-    gently('You are printing, but you are not printing the right string.')
-else:
-    gently("You are not printing anything!")
-{% endfilter %}
     
-<h4>Example 2 (Moderate)</h4>
+    <h1>Table of Contents</h1>
+    <ul>
+        <li><a href="#making-assignments">Making Assignments</a></li>
+        <li><a href="#editing-reading">Editing a Reading</a></li>
+        <li><a href="#editing-quiz">Editing a Quiz</a></li>
+        <li><a href="#editing-coding">Editing a BlockPy Coding Problem</a></li>
+        <li><a href="#blockpy-feedback">Writing Automatic Feedback</a></li>
+        <li><a href="#linking-canvas">Linking BlockPy Assignments in Canvas</a></li>
+        <li><a href="#file-support">Making Assignments with Files</a>
+            <ul>
+                <li><a href="#file-support-files">Files</a></li>
+                <li><a href="#file-support-images">Images</a></li>
+                <li><a href="#file-support-urls">URLs</a></li>
+            </ul>
+        </li>
+    </ul>
 
-<p>
-BlockPy: #9.1) Addition<br>
-Using the + operator, print out the result of 5+2 (which will represent the number of days in a week, as the combination of weekdays and the weekend). Do not embed the result in your code. Let Python do the calculation for you.
-</p>
-{% filter highlight_python_code %}
-from pedal.toolkit.printing import *
-from pedal.toolkit.utilities import *
+    <h1>Making Assignments from BlockPy Site</h1>
 
-ast = parse_program()
-numbers = ast.find_all('Num')
-seen = {2, 5}
-for number in numbers:
-    if number.n in seen:
-        seen.remove(number.n)
-    else:
-        gently("You should only use the numbers 2 and 5 once each in your code.")
-if seen:
-    gently("You must use the numbers 2 and 5 once each in your code.")
+    <p>
+        Making assignments in the BlockPy site tends to be easier, since you will have more screen space. The editor is
+        also slightly more sophisticated.
+    </p>
 
-prints = ensure_prints(1)
-if prints:
-    if prints[0].args:
-        if prints[0].args[0].ast_name == "BinOp":
-            if prints[0].args[0].op_name != "Add":
-                gently("Make sure you are using the + operator!")
-            elif "7" in get_output():
-                set_success()
-            else:
-                gently("You have calculated the wrong value")
-        else:
-            gently("Make sure you are using the + operator!")
-    else:
-        gently("You are not printing anything! Put something between those parentheses.")
-{% endfilter %}
+    <p>
+        <strong>Step 0:</strong> Make sure you have <a href="{{ url_for('courses.add_canvas') }}">created a new Canvas
+        course</a>. Presently, BlockPy is not supporting any other LMS. It is possible that all of the following will
+        work for Moodle, but it has not been tested extensively.<br><br>
 
-<h4>Example 3 (Complex)</h4>
+        You should be able to open up the BlockPy Dashboard in Canvas, which will ensure
+        you are logged in and you have Instructor permissions for your new course.
+    </p>
 
-<p>
-BlockPy: #32.5) For with Function<br>
-Create a function convert_fahrenheit that consumes a single temperature in Celsius and returns it in Fahrenheit. Then, use that function inside a for loop to convert and print each of the following temperatures: 10, 20, and 30.
-</p>
+    <p><img src="{{ url_for('static', filename='images/instructions/dashboard.png') }}" class='center-block border p-4'
+            alt='Picture of the BlockPy Dashboard, with the user logged into the course as an instructor'/>
+    </p>
 
-{% filter highlight_python_code %}
-from pedal.toolkit.printing import *
-from pedal.toolkit.utilities import *
-from pedal.toolkit.functions import *
+    <p>
+        <strong>Step 1:</strong> Open the <a href="{{ url_for('courses.index') }}">course on BlockPy</a> and click
+        Manage Assignments.
+    </p>
 
-if any(('def' in line and '[' in line) for line in get_program().split("\n")):
-    explain("It looks like you added a square bracket on the same line as "
-            "the <code>def</code> keyword. Remember, with Python you do not "
-            "indicate the type of a parameter. A parameter only has a name; "
-            "when the function is called, a value (which will have a type) "
-            "will be assigned to it.", 'verifier')
+    <p><img src="{{ url_for('static', filename='images/instructions/blockpy_courses.png') }}"
+            class='center-block border p-4'
+            alt="Screenshot of BlockPy courses page, listing all of this instructor's courses"/><br></p>
 
-ast = parse_program()
+    <p><img src="{{ url_for('static', filename='images/instructions/blockpy_course_example.png') }}"
+            class='center-block border p-4'
+            alt="Screenshot of a single course page on BlockPy, highlighting the Manage Assignments button"/><br></p>
 
-num_values = [n.n for n in ast.find_all("Num")]
+    <p>
+        <strong>Step 2:</strong> From this interface, you can create BlockPy assignments and groups. Let's talk about
+        some vocabulary.
 
-if any([n in (50, 68, 86) for n in num_values]):
-    explain("It looks like you may have embedded the answer in the code. Don't do that.")
+    <ul>
+        <li><strong>BlockPy Assignment: </strong>A single blockpy coding problem, reading, or quiz. Sometimes referred
+            to as a "Problem" for simplicity. Distinct from a Canvas Assignment, instead living on BlockPy's server.
+        </li>
+        <li><strong>BlockPy Assignment Group: </strong> A collection of BlockPy Assignments organized by name. The
+            assignments within a group are naturally sorted by their name. Also lives on the BlockPy server
+        </li>
+        <li><strong>Canvas Assignment: </strong> A resource that lives on Canvas' server and can link to a BlockPy
+            Assignment or Assignment Group via the External Tools API (LTI). Specifically, a Canvas Assignment can link
+            to a specific BlockPy URL.
+        </li>
+    </ul>
 
-if ast.find_all("While"):
-    explain("Do not use a <code>while</code> loop.")
+    If you want to create Canvas Assignments for the BlockPy Assignments you create, that needs to happen afterwards via
+    the Canvas site.
+    There are instructions further below for <a href="#linking-canvas">linking Canvas and BlockPy assignments</a>.
+    </p>
 
-cf_def = match_signature("convert_fahrenheit", 1)
-if cf_def:
-    if not cf_def.find_all("Return"):
-        explain("You are not using a <code>return</code> statement!")
-    if cf_def.find_all("For"):
-        explain("Your function definition should not have a <code>for</code> in it.")
-    if unit_test("convert_fahrenheit", 
-                 (10,50.0), 
-                 (20, 68.0), 
-                 (30, 86.0),
-                 (5, 41.0)):
-        fors = ast.find_all("For")
-        if not fors:
-            explain("You will need a <code>for</code> loop.")
-        else:
-            calls = [c.func.id for c in fors[0].find_all('Call')
-                    if c and c.func.ast_name == "Name"]
-            if not ("print" in calls):
-                gently("You will need to print inside the <code>for</code> loop.")
-            elif not ("convert_fahrenheit" in calls):
-                gently("You will need to call <code>convert_fahrenheit</code> "
-                       "in the <code>for</code> loop.")
-            else:
-                calls = find_function_calls('convert_fahrenheit')
-                if len(calls) > 1:
-                    gently("You should call <code>convert_fahrenheit</code> only once.")
-                elif not calls:
-                    gently("You should call <code>convert_fahrenheit</code> once.")
-                elif tuple(get_output()) == ("50.0", "68.0", "86.0"):
-                    set_success()
-                elif get_output():
-                    gently("You are not printing the right result.")
-                else:
-                    gently("Make sure you are printing!")
-{% endfilter %}
+    <p>
+        <strong>Step 2.1:</strong> There are two general kinds of resources to create: Assignment Groups and
+        Assignments. Groups organize Assignments for a course, so you usually will
+        start by creating a Group.
+    </p>
+
+    <p><img src="{{ url_for('static', filename='images/instructions/blockpy_save_group.png') }}"
+            class='center-block border p-4'
+            alt='Screenshot of the Create Assignment Group Modal'/><br></p>
+
+    <p>You need to specify the group's Name and URL.
+    <ul>
+        <li><strong>Name: </strong> The name is not visible to students, but is shown in the assignment interface for
+            instructors. We recommend something friendly and descriptive. This will also be used to sort the groups in
+            the interface (alphabetically).
+        </li>
+        <li><strong>URL: </strong> This is a unique bit of text that can be used to link to this assignment instead of
+            its numeric ID. The URL must be unique across all assignment groups. The general format we recommend is
+            <code>(course name)_(topic name)</code>; so for our <code>Sneks</code> Python course, our FOR loop
+            assignment group might be given the URL of <code>sneks_loops</code>. Since these can end up being used as
+            URLs and Filenames, stick to using only letters, numbers, dashes, and underscores.
+        </li>
+    </ul>
+    </p>
+
+    <p>The newly created Group will appear in order in the list below. </p>
+
+    <p><strong>Step 2.2:</strong> You can start creating new assignments for the group using the Create Assignment
+        button.</p>
+
+    <p><img src="{{ url_for('static', filename='images/instructions/blockpy_create_assignment.png') }}"
+            class='center-block border p-4'
+            alt='Screenshot of the Create Assignment Modal'/><br>
+    </p>
+
+    <p>Assignments are a little more complicated than Groups.
+
+    <ul>
+        <li><strong>Type: </strong> There are currently three types of assignments:
+            <ul>
+                <li><strong>BlockPy</strong> assignments are coding problems using the BlockPy interface.</li>
+                <li><strong>Readings</strong> allow you to have a bit of scrollable, embedded markdown on its own page.
+                </li>
+                <li><strong>Quiz Question</strong> are very alpha-level replacements for Canvas Quizzes. They are
+                    horrible to edit :)
+                </li>
+            </ul>
+        </li>
+        <li><strong>Name: </strong> Like groups, assignments have a publicly facing name used to sort them within their
+            Group. However, students WILL see this name.
+        </li>
+        <li><strong>Unique URL: </strong> The same rules for Group URLs apply to Assignment URLs. They should be unique
+            and filesystem safe. Our convention is similar as for groups, with the addition of the problem's name. For
+            example, if you had a For Loop problem on converting temperatures, it might be <code>sneks_loops_convert_temperatures</code>.
+        </li>
+        <li><strong>Add to Group: </strong> If you have previously created a group, then this will default to that most
+            recently created group. Otherwise, it will default to the most previously used group, or the Unsorted Group.
+            The Unsorted Group is where assignments live when they do not belong to any other group.
+        </li>
+    </ul>
+    </p>
+
+    <p><strong>Step 3: </strong>Now you can view and edit your assignments. Here are some useful features:
+    <ul>
+        <li>You can click a Group's name to edit the name and URL. This is a little wonky but should work.</li>
+        <li>To view an entire group, hover over its row and click the "View" button that appears.</li>
+        <li>To remove a group, hover over its row, click the dropdown arrow on the right, and click Delete.</li>
+        <li>To change the Passcode and IP Address for a group, hover over its row, click the dropdown arrow on the rihgt, and click Edit Security.</li>
+        <li>You can edit an assignment by clicking the Edit button on the right hand side of it. This is also one way of getting its assignment URL for Canvas.</li>
+        <li>To move an assignment to a different group, hover over the row of the assignment, click the Move button, and then click the desired target group.</li>
+        <li>To delete an assignment, click the drop-down arrow to the right of the assignment.</li>
+    </ul>
+    </p>
+
+    <h1 id="editing-reading">Editing a Reading</h1>
+
+    <p>Readings are a way to embed some markdown for students to review before starting an assignment group.
+        Or in the middle, it's not like it has to be anywhere specifically.
+    Anyway, to edit the content of the Reading page, you can use the [Form Editor] option.
+    This shows off a Markdown editor WYSIWYG. After you are happy with your content (preview it with the "Actual Reader"), then you can click "Save Assignment" to persist your changes.
+    </p>
+
+    <p>Readings can also have Points (automatically given when they load the Reading page). They also have a Name and URL like any other Assignment.</p>
+
+    <p>The additional settings are a little wonky, but currently include:
+    <ul>
+        <li><code>header</code>: A header tag rendered at the top of the page</li>
+        <li><code>slides</code>: A URL that will be displayed as a clickable button in the topright to provide downloadable slides</li>
+        <li><code>youtube</code>: A YouTube ID (e.g., <code>2Nr1ZDbGtI8</code>) that will be embedded as a video (with tracking) in the page.</li>
+        <li><code>summary</code>: A string of text that will be rendered at the top of the page.</li>
+    </ul>
+    </p>
+
+    <p>Remember, editing the settings requires you to click the "Save Assignment" button again!</p>
+
+    <h1 id="editing-quiz">Editing a Quiz</h1>
+
+    <p>You can find the latest documentation on <a href="https://github.com/blockpy-edu/blockpy-server/blob/master/frontend/components/quizzes/quiz_schema.md" target="_blank">quiz editing here.</a></p>
+
+    <h1 id="editing-coding">Editing a BlockPy Coding Problem</h1>
+
+    <p>Okay, so this is probably why you are here. Editing a BlockPy problem can be a little overwhelming. Take it slow and easy!</p>
+
+    <p><strong>Step 1:</strong> Let's look at the Settings tab of the BlockPy interface.</p>
+
+    <p><img src="{{ url_for('static', filename='images/instructions/blockpy_coding_settings.png') }}"
+            class='center-block border p-4'
+            alt='Screenshot of the latest version of the BlockPy Coding Interface, specifically the Settings screen'/>
+    </p>
+
+    <p>Here is some information:
+        <ul>
+            <li>In the top-right, we have checked the "View as Instructor". Uncheck that to see the interface how students will eventually see it.</li>
+            <li>Also in the top-right is a button with cross-hair arrows. You can activate fullscreen with this button if you need more room.</li>
+            <li>The last button in the top-right is for editing default inputs. More on that later.</li>
+            <li>In the top-left, we see the assignment's name and instructions. You can edit the Instructions as markdown in the "Instructions" tab. Note that every time you edit the Instructions, it will automatically save.</li>
+            <li>Below the instructions are a Console and Feedback area. Students (and you) will see results from running a program here.</li>
+            <li>Next row is the Files tab. This controls which editor is visible.
+            <ul>
+                <li><code>answer.py</code>: This is the current editable submission for the assignment; when you want to test an answer, you can edit this code and run it. Auto-saves as you type.</li>
+                <li><code>Instructions</code>: This is a markdown editor for the assignment's instructions. Also auto-saves as you type.</li>
+                <li><code>Settings</code>: Easily the most complicated menu. Explained a little more below. Does not auto-save.</li>
+                <li><code>Starting Code</code>: If you want students to start off with some code in their editor, add it here. Will not affect existing submissions. Autosaves.</li>
+                <li><code>On Run></code>: This is a Python editor that let's you write feedback generating code. It is executed after the students' code is run. Autosaves. Explained in more detail in <a href="#blockpy-feedback">Writing Feedback</a>.</li>
+                <li><code>Add New</code>: BlockPy has a simplistic filesystem that let's you create additional files for students. Some are special (<code>On Eval</code>, <code>URL Data</code>), but you can also create generic files to provide students or hide for instructor grading purposes. Explained further below (not yet completed).</li>
+            </ul>
+            </li>
+        </ul>
+    </p>
+
+    <p>The Settings tab is one of the most complicated. There are quite a few settings available for a Problem. Most of them are explained in their text.
+        Further explanations will go here, as needed. Critically, however, you need to know that these settings are NOT automatically saved. You must manually
+        click the "Save changes" button, unlike the rest of the editor.
+    </p>
+
+    <p>At the very bottom of the page, there is a row used to show off the current status of the environment and debug information.
+    Ideally, you can ignore it, but here's some additional info just in case.
+    </p>
+
+    <p><img src="{{ url_for('static', filename='images/instructions/blockpy_coding_status.png') }}"
+            class='center-block border p-4'
+            alt='Screenshot of the latest version of the BlockPy Coding Interface, specifically the Settings screen'/>
+    </p>
+
+    <p>
+        The first row is a set of buttons that will ideally always be green. They indicate whether a particular server endpoint is working correctly.
+        When they turn red, they indicate that something has gone wrong. If they turn grey, they are not active. Inactive buttons are common when you
+        are working on ungraded assignments like in the "Try Editor" screen.
+    </p>
+    <p>
+        As an instructor, it is easy to have some of the buttons turn red: "Update Submission" will rarely work, for instance, since there's no gradebook entry to update for your user (unless you use View Student mode in Canvas).
+    </p>
+    <p>
+        The line below that says "Ready" shows an HTTP or Server Error if there was one.
+    </p>
+    <p>
+        The last line shows various pieces of information about the current user, course, group, assignment, and submission. Often, when reporting issues, it is helpful to show this information so we know if it's caused by a linking issue.
+    </p>
+
+    <h1 id="blockpy-feedback">Writing Automatic Feedback</h1>
+
+    <p>
+    Automatic Feedback in BlockPy is achieved by adding Pedal assertions in the <code>On Run</code> tab of the editor.
+    If you are not familiar, <a href="https://pedal-edu.github.io/pedal" target="_blank">Pedal</a> is a Python library for writing feedback code.
+    It originally started as a submodule of BlockPy, but spun off to be its own entity. BlockPy still supports Pedal thoroughly!
+    </p>
+
+    {% filter highlight_python_code %}
+from pedal import *
+
+assert_output(student, "Hello world!")
+    {% endfilter %}
+
+    <p>
+        For more information about writing Pedal feedback, refer to this <a href="https://pedal-edu.github.io/pedal/teachers/quickstart.html#core-feedback-functions">quickstart guide</a>.
+    </p>
+
+    <h1 id="linking-canvas">Linking BlockPy Assignments in Canvas</h1>
+
+    <p>
+        Here is the current workflow for creating new BlockPy problems with feedback.
+    </p>
+
+    <p>
+        <strong>Step 0:</strong> Make sure you have <a href="{{ url_for('courses.add_canvas') }}">created a new Canvas
+        course</a>. Presently, BlockPy is not supporting any other LMS. It is possible that all of the following will
+        work for Moodle, but it has not been tested extensively.
+    </p>
+
+    <p>
+        <strong>Step 1:</strong> Visit the course on Canvas and click the Assignments tab.
+    </p>
+
+    <p>
+        <img src="{{ url_for('static', filename='images/instructions/choose_assignments.png') }}"
+             class='center-block border p-4'
+             alt='Screenshot of canvas navigation menu with assignments button circled'/><br>
+    </p>
+
+    <p>
+        <strong>Step 2:</strong> Click the [+Assignment] button in the top right corner.
+    </p>
+
+    <img src="{{ url_for('static', filename='images/instructions/add_assignment.png') }}" class='center-block'
+         alt='Screenshot of Canvas Assignment screen with an arrow pointing to the +Assignment button'/><br>
+
+    <p>
+        <strong>Step 3:</strong> Set the assignment type to External Tool.
+    </p>
+
+    <p>
+        At this point, you have a choice. If you already know the URL of the BlockPy assignment or group that you wish
+        to use, you can just place it in the input box.
+        However, you can also select it from a visual interface by clicking [Find].
+    </p>
+
+    <img src="{{ url_for('static', filename='images/instructions/external_tool.png') }}" class='center-block'
+         alt='Screenshot of Edit Assignment screen on Canvas with arrwos pointing to the External Tool dropdown and the Find button'/>
+    <br>
+
+    <p>
+        <strong>Step 4:</strong> Click BlockPy.
+    </p>
+
+    <img src="{{ url_for('static', filename='images/instructions/choose_blockpy.png') }}" class='center-block'
+         alt='Screenshot of Canvas Configure External Tool Dialog with an arrow pointing at the BlockPy Version X option'/>
+    <br>
+
+    <p>
+        <strong>Step 5:</strong> Find the desired BlockPy Assignment or Assignment Group. You may want to choose an
+        assignment from another course.
+    </p>
+
+    <img src="{{ url_for('static', filename='images/instructions/edit_assignments.png') }}" class='center-block'
+         alt='Screenshot of BlockPy menu for selecting assignments.'/><br>
+
+    <p>
+        <strong>Step 6:</strong> When you have created your desired group or assignment, click Select to attach it to
+        the Canvas assignment. Click Select again to close the menu, and then finish setting any other options for the
+        assignment in canvas (e.g., number of points, due date, assignment name). Save the assignment.
+    </p>
+
+    <h1 id="file-support">Making Assignments with Files</h1>
+
+    <p>
+    BlockPy supports the concept of files in a few different ways, which we will refer to as:
+    </p>
+
+    <ul>
+        <li><strong>Files</strong>: Text files can be added as "Starting Files", "Instructor Files", or "Student Files".</li>
+        <li><strong>Images</strong>: Binary files can be added as "Images" (so not just images, but also e.g., databases).</li>
+        <li><strong>URLs</strong>: HTTP requests can be mocked with the "URL Data" feature.</li>
+    </ul>
+
+    <p>
+    Which option is right for you? Here are the general rules:
+    </p>
+
+    <ul>
+        <li>If you want to import a Python module or open and read a simple text file
+            (e.g., <code>.txt</code>, <code>.csv</code>, <code>.json</code>), then
+            you should use the <strong>Files</strong> interface.</li>
+        <li>If you want to open an image file with the <code>PIL</code> module, then you should
+            use the <strong>Images</strong> interface.</li>
+        <li>If you want to use the <code>requests</code> module, then you should use the
+            <strong>URLs</strong> interface.</li>
+    </ul>
+
+    <h2 id="file-support-files">Files</h2>
+
+    <p>
+    The Files interface is the most general, allowing you to create text files that can be read by Python code.
+    These files come in three primary varieties:
+    </p>
+
+    <ul>
+        <li><strong>Starting File:</strong> This file is provided to the student when they first open the
+            assignment. Students will get a copy of the file which they are free to make modifications to.
+            Only instructors can edit the original file.
+        </li>
+        <li><strong>Instructor File:</strong> This file is meant for files that the instructor autograding code
+            will use. You can use this to hide files from students that they should have access to,
+            but not modify. You can also completely hide the file from students so that they don't have
+            any access.
+        </li>
+        <li><strong>Student File:</strong> This is for files that are only in YOUR student space.
+            Recall that every user accessing an assignment has a submission, including instructors.
+            So, for instance, if you needed a local file for testing purposes that you do not
+            want to use for other users, you can add files with this feature.</li>
+    </ul>
+
+    <p>Additionally, files have three options for controlling their individual privacy:</p>
+
+    <ul>
+        <li><strong>Completely inaccessible:</strong> The student has absolutely no way to see or
+            programatically access this file. It is meant for instructor files that should be kept
+            completely private, like additional unit tests.</li>
+        <li><strong>Hidden from student, accessible programatically:</strong> The student will not see
+            this file in the tabs, but can actually open it with the <code>open</code> function.
+            This is a more narrowly useful feature, meant for hidden files in games.</li>
+        <li><strong>Visible to student, but not editable:</strong> These instructor files are visible
+            and accessible to students programatically, but cannot be edited (unlike files that exist in
+            the student file space, like those created using <code>Starting File</code> and <code>Student File</code>.
+            This is good for most kinds of data files that you want the student to be able to look at and use, but not mess with.</li>
+    </ul>
+
+    <p>
+    If you want students to be able to see the files tab (and therefore any files), you will need
+        to uncheck the <code>Hide Files</code>code> setting in the assignment settings menu.
+    </p>
+
+    <h2 id="file-support-images">Images</h2>
+
+    <p>
+    If you want to work with the <code>PIL</code> module, then you want to use the Images interface.
+    This interface is a little simpler than the Files interface, but is critical for working with binary data.
+    </p>
+
+    <p>
+    First, you should enable the <code>Preload All Files</code> setting so that the <code>Images</code> tab is available to students.
+    I generally recommend keeping the <code>Hide Files</code> setting enabled, otherwise students will be shown the "Add Student File" button
+        (which is confusing, since they should only be adding images through the Images menu).
+    </p>
+
+    <p>
+    If the menu is not already present for you, then you can click "Add New" and choose the "Images" button.
+    This will move it to the files tab (and that's where it will be for everyone from now on).
+    At the top of the menu are the currently available files, and at the bottom is a form for uploading new files.
+    Instructors have buttons for manipulating the files in the course and the assignment, whereas students can only affect the images for their own submission.
+    Generally, there are a few places for the images to go:
+    </p>
+
+    <ul>
+        <li><strong>Course:</strong> Images can be made available to everyone in the current course. That means that they'll be available on every single assignemnt for that course too.</li>
+        <li><strong>Assignment:</strong> Images can be made available to everyone completing this assignment. That means that other assignments (even assignments in the same group) cannot see this image. Every student is accessing the same copy of the image, though, even across their different submissions.</li>
+        <li><strong>Assignment's Course:</strong> If an assignment is being adopted into a different course, then the images from that original course are also available.</li>
+        <li><strong>Submission:</strong> Images can be made available to ONLY this submission. Students upload new images to their own submission, so students cannot access each other's submission images.</li>
+    </ul>
+
+    <p>
+    The images are uploaded as binary files, so you can upload any kind of file you want. However, the BlockPy interface will only display images.
+    The filename listed is how you can access the image in BlockPy through <code>Image.open</code>.
+    If a file exceeds the maximum file size, then it will be rejected.
+    You can click on an image to preview the image at a larger size.
+    </p>
+
+    <h2 id="file-support-urls">URLs</h2>
+
+    <p>This is even more complicated. Basically, you have to provide a hidden JSON file that
+    will map the students' URLs to the local files. And don't even get me started on the difference
+    between binary and text files here. Good luck! Better take a look at some of the examples
+    from the Canvas Analyzer project and the <code>requests</code> assignments...</p>
 
 {% endblock %}
 

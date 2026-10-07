@@ -1,0 +1,619 @@
+/*!*****************************************************************************************************************************************************************!*\
+  !*** css ./node_modules/css-loader/dist/cjs.js??ruleSet[1].rules[1].use[1]!./node_modules/filepond-plugin-image-preview/dist/filepond-plugin-image-preview.css ***!
+  \*****************************************************************************************************************************************************************/
+/*!
+ * FilePondPluginImagePreview 4.6.12
+ * Licensed under MIT, https://opensource.org/licenses/MIT/
+ * Please visit https://pqina.nl/filepond/ for details.
+ */
+
+/* eslint-disable */
+.filepond--image-preview-markup {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.filepond--image-preview-wrapper {
+  z-index: 2;
+}
+.filepond--image-preview-overlay {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  min-height: 5rem;
+  max-height: 7rem;
+  margin: 0;
+  opacity: 0;
+  z-index: 2;
+  pointer-events: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+.filepond--image-preview-overlay svg {
+  width: 100%;
+  height: auto;
+  color: inherit;
+  max-height: inherit;
+}
+.filepond--image-preview-overlay-idle {
+  mix-blend-mode: multiply;
+  color: rgba(40, 40, 40, 0.85);
+}
+.filepond--image-preview-overlay-success {
+  mix-blend-mode: normal;
+  color: rgba(54, 151, 99, 1);
+}
+.filepond--image-preview-overlay-failure {
+  mix-blend-mode: normal;
+  color: rgba(196, 78, 71, 1);
+}
+/* disable for Safari as mix-blend-mode causes the overflow:hidden of the parent container to not work */
+@supports (-webkit-marquee-repetition: infinite) and
+  ((-o-object-fit: fill) or (object-fit: fill)) {
+  .filepond--image-preview-overlay-idle {
+    mix-blend-mode: normal;
+  }
+}
+.filepond--image-preview-wrapper {
+  /* no interaction */
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+
+  /* have preview fill up all available space */
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 100%;
+  margin: 0;
+
+  /* radius is .05em less to prevent the panel background color from shining through */
+  border-radius: 0.45em;
+  overflow: hidden;
+
+  /* this seems to prevent Chrome from redrawing this layer constantly */
+  background: rgba(0, 0, 0, 0.01);
+}
+.filepond--image-preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  display: flex; /* this aligns the graphic vertically if the panel is higher than the image */
+  align-items: center;
+  height: 100%;
+  width: 100%;
+  pointer-events: none;
+  background: #222;
+
+  /* will be animated */
+  will-change: transform, opacity;
+}
+.filepond--image-clip {
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+
+  /* transparency indicator (currently only supports grid or basic color) */
+}
+.filepond--image-clip[data-transparency-indicator='grid'] img,
+.filepond--image-clip[data-transparency-indicator='grid'] canvas {
+  background-color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox=%270 0 100 100%27 xmlns=%27http://www.w3.org/2000/svg%27 fill=%27%23eee%27%3E%3Cpath d=%27M0 0 H50 V50 H0%27/%3E%3Cpath d=%27M50 50 H100 V100 H50%27/%3E%3C/svg%3E");
+  background-size: 1.25em 1.25em;
+}
+.filepond--image-bitmap,
+.filepond--image-vector {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+}
+.filepond--root[data-style-panel-layout~='integrated']
+  .filepond--image-preview-wrapper {
+  border-radius: 0;
+}
+.filepond--root[data-style-panel-layout~='integrated']
+  .filepond--image-preview {
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--image-preview-wrapper {
+  border-radius: 99999rem;
+}
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--image-preview-overlay {
+  top: auto;
+  bottom: 0;
+  -webkit-transform: scaleY(-1);
+  transform: scaleY(-1);
+}
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--file
+  .filepond--file-action-button[data-align*='bottom']:not([data-align*='center']) {
+  margin-bottom: 0.325em;
+}
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--file
+  [data-align*='left'] {
+  left: calc(50% - 3em);
+}
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--file
+  [data-align*='right'] {
+  right: calc(50% - 3em);
+}
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--progress-indicator[data-align*='bottom'][data-align*='left'],
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--progress-indicator[data-align*='bottom'][data-align*='right'] {
+  margin-bottom: calc(0.325em + 0.1875em);
+}
+.filepond--root[data-style-panel-layout~='circle']
+  .filepond--progress-indicator[data-align*='bottom'][data-align*='center'] {
+  margin-top: 0;
+  margin-bottom: 0.1875em;
+  margin-left: 0.1875em;
+}
+
+/*!****************************************************************************************************************!*\
+  !*** css ./node_modules/css-loader/dist/cjs.js??ruleSet[1].rules[1].use[1]!./components/feedback/feedback.css ***!
+  \****************************************************************************************************************/
+/*
+ * Cadence feedback messages: a `.cadence-message` wrapping one Bootstrap card
+ * (`.card.cadence-section.cadence-<kind>`) per section, with Markdown bodies.
+ * Kept close to the site's plain Bootstrap look (white boxes, light grey
+ * borders, the body font size); the card basics are repeated here so the
+ * message still reads as boxes on pages without Bootstrap.
+ */
+.cadence-message .cadence-section {
+    margin-bottom: 1rem;
+    background: white;
+    border: 1px solid lightgrey;
+    border-radius: .25rem;
+}
+
+.cadence-message .cadence-section > .card-header {
+    padding: .5rem 1rem;
+    background: #f7f7f7;
+    border-bottom: 1px solid lightgrey;
+    font-size: 16px;
+}
+
+.cadence-message .cadence-section > .card-body {
+    padding: 1rem;
+}
+
+.cadence-message .card-body > :last-child {
+    margin-bottom: 0;
+}
+
+.cadence-message .card-body ul,
+.cadence-message .card-body ol {
+    padding-left: 1.5rem;
+}
+
+.cadence-message .card-body li + li {
+    margin-top: .25rem;
+}
+
+/*
+ * One exam topic (`.card.cadence-topic`, 2026-10-01): a box inside the exam
+ * section, titled with the topic and numbered ("Topic 2 of 3") when the message
+ * reports several. Faintly grey, every second one lighter (`.cadence-topic-alt`),
+ * so neighbouring topics read as separate boxes. Mirrors `style` in the course's
+ * content/layout.yaml (2026.10.1).
+ */
+.cadence-message .card-header {
+    background: #f1f3f5;
+}
+
+.cadence-message .card-body p:last-child,
+.cadence-message .card-body ul:last-child {
+    margin-bottom: 0;
+}
+
+.cadence-message ul {
+    padding-left: 1.4em;
+}
+
+.cadence-topic {
+    background: #f4f5f7;
+}
+
+.cadence-topic-alt {
+    background: #fcfcfd;
+}
+
+.cadence-topic:last-child {
+    margin-bottom: 0 !important;
+}
+
+.cadence-topic > .card-body {
+    padding: 0.9rem 1.1rem;
+}
+
+.cadence-topic-title {
+    font-size: 1.05em;
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid #e3e6ea;
+}
+
+.cadence-topic-title .badge {
+    font-weight: 600;
+    margin-right: 0.35rem;
+    vertical-align: 0.1em;
+}
+
+.cadence-topic ul {
+    margin-bottom: 0.75rem;
+}
+
+/*!***********************************************************************************************!*\
+  !*** css ./node_modules/css-loader/dist/cjs.js??ruleSet[1].rules[1].use[1]!./styles/test.css ***!
+  \***********************************************************************************************/
+body {
+    font-size: 14px;
+}
+
+a {
+    text-decoration: underline;
+}
+
+a[role="button"], button a, a.btn, .btn a, .nav a, .navbar a,
+.dropdown-menu a {
+    text-decoration: none;
+}
+
+.text-monospace {
+    font-family: monospace;
+}
+
+.dropdown-menu, .form-control {
+    font-size: 14px;
+}
+
+button, input.btn, a.btn {
+    font-size: 14px;
+}
+
+.navbar-inverse .navbar-nav > li > a {
+    color: white;
+}
+
+.navbar-inverse a.navbar-brand {
+    color: white;
+}
+
+.navbar-inverse .navbar-link.btn.btn-outline-secondary {
+    color: black;
+}
+
+.nav-item.active {
+    background-color: black;
+}
+
+.bg-dark {
+    background-color: #222 !important;
+}
+
+.nav a.dropdown-toggle:focus {
+    outline: 1px solid rgb(77, 144, 254);
+}
+
+table caption {
+    color: #333;
+}
+
+.label-default {
+    background-color: #444;
+}
+
+.btn-outline-secondary {
+    color: black;
+    background-color: white;
+}
+
+.btn-outline-secondary.disabled, .btn-outline-secondary:disabled {
+    background-color: #DDD;
+    color: black;
+}
+
+.btn-sm {
+    font-size: 12px;
+}
+
+button.btn-lg, input.btn.btn-lg, a.btn.btn-lg {
+    font-size: 16px;
+}
+
+form label {
+    font-weight: bold;
+}
+
+/* Highlight JS */
+td.hljs-ln-numbers {
+    text-align: center;
+    color: black;
+    background: lightgrey;
+    border-right: 1px solid #999;
+    vertical-align: top;
+    padding-left: 5px;
+
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+td.hljs-ln-code {
+    padding-left: 10px;
+}
+
+pre.python-code-block code {
+    overflow: auto;
+}
+
+code.hljs {
+    background: white;
+    border: 1px solid lightgrey;
+    font-family: monospace;
+    font-size: 14px;
+    padding: 0px;
+}
+
+table.hljs-ln tr {
+    border-bottom: 1px dashed #F0F0F0;
+}
+
+/* Spinner */
+.spinner-loader {
+    border: 4px solid #f3f3f3; /* Light grey */
+    border-top: 4px solid #3498db; /* Blue */
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/** Model Selector **/
+.model-selector.badge {
+    font-size: 12px;
+}
+
+.highlighttable pre {
+    font-size: 15px;
+}
+
+.highlighttable tr:first-child {
+    vertical-align: top;
+}
+
+td.code div.highlight {
+    max-width: 600px;
+    overflow-x: auto;
+}
+
+td.comment-column {
+    vertical-align: top;
+}
+
+span.line-review-quick-button {
+    padding: 0;
+    margin: 0;
+    line-height: 125%;
+    font-size: 15px;
+    display: block;
+    color: #EEE;
+    position: relative;
+}
+
+span.line-review-quick-button:hover {
+    color: darkgray;
+}
+
+span.line-review-quick-button:active {
+    color: black;
+}
+
+.total-row {
+    border-top: 2px solid darkgray;
+}
+
+.individual-review-show-box {
+    padding: 7px;
+    border-bottom: 1px solid lightgray;
+}
+
+.draft-comment {
+    font-style: italic;
+}
+
+div.line-review-box {
+    position: relative;
+}
+
+table.review-report td:last-child {
+    text-align: right;
+}
+
+.clickable {
+    cursor: pointer;
+}
+
+.draft-review {
+    border: 1px solid lightgray;
+    padding: 4px;
+    background-color: #EEE;
+}
+
+.static-popover {
+    position: absolute;
+    min-width: 500px;
+}
+
+.static-popover.expanded {
+
+}
+
+.static-popover.collapsed {
+    min-width: 300px;
+}
+
+.static-popover .arrow {
+    top: -1px;
+}
+
+.static-popover.inactive {
+    border: 0;
+}
+
+.popover-header-sm {
+    padding: 1px .5rem;
+}
+
+.popover-control {
+    padding-top: .25rem;
+}
+
+div.overlay {
+    height: 100%;
+    width: 100%;
+    position: fixed;
+    z-index: 1000000;
+    left: 0;
+    top: 0;
+    background-color: rgba(16, 16, 16, 0.5);
+    overflow-x: hidden; /* Disable horizontal scroll */
+    transition: 0.5s;
+}
+
+div.linenodiv {
+    line-height: normal;
+}
+
+reader .reader-editor .CodeMirror {
+    min-height: 500px;
+}
+
+.mdq {
+    padding: 2px;
+    border: 1px solid lightgray;
+    color: #555;
+}
+
+.mdq-True {
+    background-color: #d1e7dd;
+}
+
+.mdq-True::before {
+    content: "✔️";
+}
+
+.mdq-False {
+    background-color: #f8d7da;
+}
+
+.mdq-False::before {
+    content: "❌ ";
+}
+
+ul.maq {
+    list-style-type: none;
+    padding-left: 0;
+}
+
+li.maq {
+    position: relative;
+    padding-left: 1.5em;
+}
+
+li.maq:before {
+    content: "✔️";
+    position: absolute;
+    left: 0;
+    width: 1em;
+    height: 1em;
+}
+
+li.maq-True:before {
+    content: "✔️";
+}
+
+li.maq-False::before {
+    content: "❌ ";
+}
+
+.instructor-only-tools {
+    background-color: #fcf8e3;
+    border: 1px solid #faebcc;
+}
+
+.module {
+    position: relative;
+    border: 1px solid lightgrey;
+    padding: 1em;
+}
+
+.module .collapse,
+.module .collapsing {
+    height: 3rem;
+}
+
+.module .collapse {
+    display: block;
+    overflow: hidden;
+}
+
+.module .collapse.show {
+    height: auto;
+}
+
+.module .collapse:not(.show) {
+    display: block; /* By default the bootstrap collapse has a display: none */
+    overflow: hidden;
+}
+
+.read-more {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1;
+    /* 60% is where it should start the transition from transparent to white, increase it if you want to show more of your text */
+    background-image: linear-gradient(to bottom, transparent 60%, white);
+
+    /* The opacity and transition is just to smooth out the effect */
+    opacity: 1;
+    transition: all .3s linear;
+}
+
+.read-more:not(.collapsed) {
+    opacity: 0;
+    /* If you want to make the clickable area disapear once it is open, change the visibility to hidden */
+    /* visibility: hidden; */
+}
+
+/*# sourceMappingURL=frontend.css.map*/

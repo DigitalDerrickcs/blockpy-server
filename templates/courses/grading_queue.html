@@ -1,0 +1,21 @@
+<table class="table table-condensed table-hover table-striped table-bordered">
+<caption>Student's submissions pending review.</caption>
+<tbody>
+<tr>
+    <th>Assignment</th>
+    <th>Student</th>
+    <th>View</th>
+</tr>
+{% for submission in pending_review %}
+<tr data-student="{{ submission[1].email }}" data-assignment="{{ submission[2].id }}"
+    class="submission-row">
+    <td>{{ submission[2].title() }}</td>
+    <td>{{ submission[1].name() }} ({{ submission[1].email }})</td>
+    <td>{% if submission[0] != None -%}
+        <a target=_blank
+           href="{{ url_for('blockpy.view_submission', submission_id=submission[0].id) }}">View</a>
+    {% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>

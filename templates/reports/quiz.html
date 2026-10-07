@@ -1,0 +1,188 @@
+{% import 'helpers/report_tools.html' as report_tools %}
+{% import 'reports/quiz_question.html' as quiz_questions %}
+
+<div xml:lang="en">
+    <h2 id='{{ assignment.slug() }}'>Quiz {{ assignment.name }}</h2>
+    <strong>Status:</strong><span> {{ submission.full_status(not is_grader) }}</span>
+
+    {%  include "reports/reviewing_interface.html" with context %}
+
+    {% set hiding = assignment.hidden or assignment.get_setting('hide_submission', False) %}
+
+    {{ report_tools.render_submission_details(submission, is_grader, hiding) }}
+
+
+
+    {% set code = submission.code|json_load %}
+    {% set questions = assignment.instructions|json_load %}
+    {% set quiz_settings = questions.get('settings', {}) %}
+    {% set questions = questions.get('questions', {}) %}
+    {% set checks = assignment.on_run|json_load %}
+    {% set checks = checks.get('questions', {}) %}
+
+{% if is_grader %}
+    <div>Submission Points: {{ assignment.points * submission.score/100 }}/{{ assignment.points }}</div>
+    <div>Full Submission: <a href="{{ url_for('blockpy.load_assignment',
+                            assignment_id=submission.assignment_id,
+                            user_id=submission.user_id,
+                            course_id=submission.course_id,
+                            force_download=True,
+                            embed=True) }}">download</a></div>
+    <script>
+        submissions.push({{ submission.encode_json()|tojson }});
+        assignments.push({{ assignment.encode_json()|tojson }});
+    </script>
+    <submission-watcher params="server: server, courseId: pageCourseId,
+        user: user, 
+        userIds: {{ submission.user_id|tojson }},
+        assignmentIds: {{ submission.assignment_id|tojson }}"></submission-watcher>
+    <!--<div>History: <a href="{{ url_for('blockpy.browse_history', assignment_id=submission.assignment_id,
+        user_id=submission.user_id, course_id=submission.course_id) }}">view</a></div>-->
+    {% if 'summary' in code and code['summary']['points_possible'] != assignment.points %}
+        <div>
+        Quiz Question Points: {{ code['summary']['points_possible'] }}
+        (the sum of all the possible points within this quiz)
+        </div>
+    {% endif %}
+    <div>
+    {% if 'attempt' in code %}
+        Attempts: {{ code['attempt']['count'] }}
+        {% if code['attempt']['attempting'] %}
+            (new attempt is in progress!)
+        {% endif %}
+    {% else %}
+        Attempts: 0 (not yet submitted)
+    {% endif %}
+    {% if is_grader %}
+        <div>
+            <button class="btn btn-outline-secondary btn-sm"
+                    onclick="regrade(this, {{ submission.id }}, true)"
+            ><span style="color: transparent"></span>Force Submit and Regrade</button> on behalf of student</div>
+    {% endif %}
+    </div>
+{% endif %}
+
+<div id="reviewable-code-area-{{ submission.id }}"></div>
+
+
+{% if 'feedback' in code and (not is_grader and ('feedbackType' in quiz_settings and quiz_settings['feedbackType'].upper() == 'SUMMARY')) %}
+    <div>
+
+{#    {% set feedback_messages = (code['feedback'].values()|map(attribute='message')|reject("equalto", "Incorrect")|reject("equalto", "Correct")|join('\n')|replace("<br>", "")#}
+{#                        ).split("\n")|unique|reject("equalto", "")|sort() %}#}
+    {% set tags = code['feedback'].values()|selectattr("tags")|sum(attribute='tags', start=[])|unique()|sort() %}
+    {% if tags %}
+        <script>
+        $(document).ready(function() {
+            if (inIframe()) {
+                $(".read-textbook-link").click((event) => {
+                    event.preventDefault();
+                    console.log(event);
+                    relaunchInWindow(event.currentTarget.dataset.externalUrl);
+                });
+            }
+        });
+        </script>
+    <div class="alert alert-info" role="alert">
+        Based on an automatic analysis of your exam, we recommend you review the following lessons:
+        <ul>
+        {% for tag in tags %}
+            <li>
+            <a href="{{ url_for('assignments.load_textbook', path='bakery_textbook',
+                                page='bakery_'+tag+'_read', embed=True, course_id=submission.course_id) }}"
+               class="read-textbook-link"
+               data-external-url="{{ url_for('assignments.load', _external=True, assignment_url='bakery_'+tag+'_read',
+                       course_id=submission.course_id, embed=True)|safe }}"
+               target="_blank">
+                {{ tag.replace('_', ' - ', 1).replace('_', ' ').title() }}
+            </a>
+{#            <button class="read-textbook-link" data-external-url={{ url_for('assignments.load', _external=True, assignment_url='bakery_'+tag+'_read',#}
+{#                    course_id=submission.course_id, embed=True)|safe }}#}
+{#                    style="background:none; border:none; padding:0; color:#007bff; text-decoration:underline; cursor:pointer;">#}
+{#                {{ tag.replace('_', ' - ', 1).replace('_', ' ').title() }}#}
+{#            </button>#}
+            </li>
+        {% endfor %}
+    </ul>
+    </div>
+        {% else %}
+        <p>No automatic feedback messages were generated for this quiz. That does not mean that all of your answers were correct, just that we have no automatic feedback to provide you.</p>
+    {% endif %}
+{#    {% if feedback_messages %}#}
+{#        <p>This feedback was automatically generated during your exam. Until grades have been released, you should take it with a grain of salt.#}
+{#        They are presented in alphabetical order, not in order of importance or the order they appeared in the assessment.#}
+{#        Still, these are topics and skills that, at a minimum, you should probably review and make sure you have mastered.#}
+{#        It is likely that they are at least related to the problems that you got wrong.</p>#}
+{#        <ol>#}
+{#        {% for feedback in feedback_messages %}#}
+{#            <li>{{ feedback }}</li>#}
+{#        {% endfor %}#}
+{#        </ol>#}
+{#    {% else %}#}
+{#        <p>No automatic feedback messages were generated for this quiz. That does not mean that all of your answers were correct, just that we have no automatic feedback to provide you.</p>#}
+{#    {% endif %}#}
+    </div>
+{% elif 'feedback' in code and (not hiding or is_grader) %}
+    <div class="accordion" id="quiz-{{ assignment.id }}">
+    {% for question_id, feedback in code['feedback'].items() %}
+        {% set unique_id = "quiz-"~(assignment.id)~"-question-"~(loop.index) %}
+        {% set question = questions.get(question_id, {}) %}
+        {% set student = code.get('studentAnswers', {}).get(question_id, {}) %}
+        {% set check = checks.get(question_id, {}) %}
+        <div class="card">
+            <div class="card-header p-1">
+                <h3 class="mb-0">
+                    <button class="btn btn-link btn-block text-left" type="button" data-toggle="collapse"
+                            data-target="#{{ unique_id }}"
+                            aria-expanded="true" aria-controls="{{ unique_id }}">
+                        Quiz Question {{ loop.index }}:
+                        {%  if feedback.get('correct', False) %}
+                            ✔️ Correct! ({{- question['points'] }} points
+                        {%- else -%}
+                            ❌ Incorrect (
+                                {{- feedback.get('status') }}
+                                as {{ (feedback.get('score', 0)*100)|round()|int }}%
+                                for {{ (question['points'] * feedback.get('score', 0))|float|round(2) -}}/
+                                {{- question['points'] }}
+                                points
+                        {%- endif -%}
+                        {%- if 'summary' in code -%}
+                            {% if 'summary' in code and code['summary'].get('points_possible', 0) > 0 %}
+                            , or {{ ((100*feedback.get('score', 0)*question['points']) / code['summary']['points_possible'])|round(1) -}}%
+                            overall
+                            {% endif %}
+                        {%- endif -%})
+                    </button>
+                </h3>
+            </div>
+            <div id="{{ unique_id }}" class="collapse {% if loop.first %}show{% endif %}"
+                 aria-labelledby="header-{{ unique_id }}" data-parent="#quiz-{{ assignment.id }}">
+                <div class="card-body">
+                    {{ quiz_questions.render_quiz_question(question, feedback, student, check, is_grader, question_id) }}
+                </div>
+            </div>
+        </div>
+
+    {% endfor %}
+    </div>
+{% elif hiding %}
+    The feedback for this quiz is hidden.
+{% else %}
+    <div>No feedback given yet.</div>
+{% endif %}
+
+{% if is_grader %}
+    <div>
+    {{ report_tools.render_metrics(submission, True, False) }}
+    </div>
+
+    <div><small>
+        Submission: {{ submission.id }},
+        Assignment: {{ submission.assignment_id }} ({{ submission.assignment.name }}),
+        User: {{ submission.user_id }} ({{ submission.user.name() }}),
+        Course: {{ submission.course_id }} ({{ submission.course.name }})
+    </small></div>
+
+{% endif %}
+
+</div>

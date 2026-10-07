@@ -115,7 +115,7 @@
 
         function loadEverything() {
             $(document).ready(function () {
-                $("body").prepend(test);
+                $("body").prepend(FULL_SELECTOR_DIV); // Secretly added in from assignment_groups.html
                 $("#runButton").parent().prev().html(
                     "<span id='success-report'></span><br><span id='status-report'></span>"
                 );

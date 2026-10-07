@@ -1,0 +1,369 @@
+<div data-bind="foreach: quiz()?.displayItems()">
+    <!-- ================================================================ -->
+    <!-- Single question card                                             -->
+    <!-- ================================================================ -->
+    <!-- ko if: kind === 'single' -->
+    <!-- ko with: question -->
+    <div
+        class="card m-4"
+        data-bind="visible: visible() || !$component.asStudent(),"
+    >
+        <div class="quizzer-question card-body">
+            <quizzer-question-status
+                params="label: $parent.label, status: student, question: $data, isAnchor: true,
+                                             quiz: $component.quiz, asStudent: $component.asStudent()"
+                class="float-right"
+            ></quizzer-question-status>
+            <h5 class="card-title" data-bind="text: $parent.label"></h5>
+            <div data-bind="if: !$component.asStudent()" style="float: right">
+                <button
+                    class="btn btn-sm mr-2"
+                    data-bind="click: ()=>$component.changeEditing($data, true),
+                               visible: $data.editing()"
+                >
+                    Save
+                </button>
+                <button
+                    class="btn btn-sm mr-2"
+                    data-bind="click: ()=>$component.changeEditing($data, false),
+                               text: $data.editing() ? 'Cancel' : 'Edit'"
+                ></button>
+            </div>
+            <h6 class="card-subtitle mb-2 text-muted">
+                <!-- ko if: $component.quiz().gradeMode() !== 'SURVEY' -->
+                <!-- ko if: feedback() && (!$component.asStudent() || $component.quiz().feedbackType() === 'IMMEDIATE') -->
+                <span
+                    data-bind="text: Math.round(((feedback().score * points) + Number.EPSILON) * 100) / 100 + ' /'"
+                ></span>
+                <!-- /ko -->
+                <span data-bind="text: points"></span> points
+                <!-- /ko -->
+                <span
+                    data-bind="text: ' ('+id+')', visible: !$component.asStudent()"
+                ></span>
+            </h6>
+            <div data-bind="if: pool() && !$component.asStudent()">
+                Pool: <span data-bind="text: pool().name"></span>
+            </div>
+            <!-- ko if: $parent.warning && !$component.asStudent() -->
+            <div class="alert alert-warning p-1 small">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span data-bind="text: $parent.warning"></span>
+            </div>
+            <!-- /ko -->
+            <div
+                data-bind="visible: !$component.asStudent() || $component.quiz().attemptCount() > 0"
+            >
+                <!-- ko if: $data.editing() -->
+                <textarea
+                    data-bind="markdowneditor: {value: $data.rawBody}"
+                    style="width: 100%; height: 200px"
+                ></textarea>
+                <!-- /ko -->
+                <div
+                    data-bind="visible: !$data.editing(),
+                                markdowned: {value: $component.quiz().makeBody($data, $parent.index)}"
+                ></div>
+                <!-- Actual Question Code -->
+                <div data-bind="switch: type">
+                    <!-- True/False Question -->
+                    <div data-bind="case: 'true_false_question'">
+                        <div class="form-check">
+                            <label
+                                class="form-check-label"
+                                data-bind="attr: {for: 'question-tf-'+id+'-t'}"
+                            >
+                                <input
+                                    data-bind="checked: student,
+                                            disable: $component.isReadOnly(),
+                                            attr: {name: 'question-tf-'+id,
+                                                   id: 'question-tf-'+id+'-t'}"
+                                    class="form-check-input"
+                                    type="radio"
+                                    value="true"
+                                />
+                                True
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <label
+                                class="form-check-label"
+                                data-bind="attr: {for: 'question-tf-'+id+'-f'}"
+                            >
+                                <input
+                                    data-bind="checked: student,
+                                        disable: $component.isReadOnly(),
+                                        attr: {name: 'question-tf-'+id,
+                                               id: 'question-tf-'+id+'-f'}"
+                                    class="form-check-input"
+                                    type="radio"
+                                    value="false"
+                                />
+                                False
+                            </label>
+                        </div>
+                    </div>
+                    <!-- Multiple Choice -->
+                    <div
+                        data-bind="case: 'multiple_choice_question',
+                                    css: { 'quizzer-question-mcq-horizontal': $data.horizontal }"
+                        class="quizzer-question-mcq-answers"
+                    >
+                        <!-- ko foreach: answers -->
+                        <div class="form-check">
+                            <label
+                                data-bind="attr: {for: 'question-mcq-'+$parent.id+'-'+$index()}"
+                                class="form-check-label"
+                            >
+                                <input
+                                    data-bind="checked: $parent.student,
+                                                value: $data,
+                                                disable: $component.isReadOnly(),
+                                                attr: {name: 'question-mcq-'+$parent.id,
+                                                       id: 'question-mcq-'+$parent.id+'-'+$index()}"
+                                    class="form-check-input"
+                                    type="radio"
+                                />
+                                <span
+                                    data-bind="markdowned: {value: $data}"
+                                ></span>
+                            </label>
+                        </div>
+                        <!-- /ko -->
+                    </div>
+                    <!-- Multiple Answers Question -->
+                    <div data-bind="case: 'multiple_answers_question'">
+                        <!-- ko foreach: answers -->
+                        <div class="form-check">
+                            <label
+                                data-bind="attr: {for: 'question-maq-'+$parent.id+'-'+$index()}"
+                                class="form-check-label"
+                            >
+                                <input
+                                    data-bind="checked: $parent.student,
+                                            checkedValue: $data,
+                                            disable: $component.isReadOnly(),
+                                            attr: {id: 'question-maq-'+$parent.id+'-'+$index(),
+                                                   name: 'question-maq-'+$parent.id+'-'+$index()}"
+                                    class="form-check-input"
+                                    type="checkbox"
+                                />
+                                <span
+                                    data-bind="markdowned: {value: $data}"
+                                ></span>
+                            </label>
+                        </div>
+                        <!-- /ko -->
+                    </div>
+                    <!-- Text Only Question -->
+                    <div data-bind="case: 'text_only_question'"></div>
+                    <!-- Matching Question -->
+                    <div
+                        data-bind="case: 'matching_question'"
+                        class="container"
+                    >
+                        <!-- ko foreach: statements -->
+                        <div class="row justify-content-between mb-3">
+                            <div
+                                class="col"
+                                data-bind="markdowned: {value: $data}"
+                            ></div>
+                            <div class="col">
+                                <select
+                                    class="custom-select"
+                                    data-bind="options: $parent.retainOrder ? $parent.answers : [...$parent.answers].sort(() => Math.random() - 0.5),
+                                               disable: $component.isReadOnly(),
+                                               optionsCaption: '',
+                                               value: $parent.student[$index()],
+                                               attr: {id: 'question-mat-'+$parent.id+'-'+$index()}"
+                                ></select>
+                            </div>
+                        </div>
+                        <!-- /ko -->
+                    </div>
+                    <!-- Multiple Dropdown Question -->
+                    <div data-bind="case: 'multiple_dropdowns_question'"></div>
+                    <!-- Short Answer -->
+                    <div data-bind="case: 'short_answer_question'">
+                        <div class="form-group">
+                            <input
+                                type="text"
+                                class="form-control"
+                                autocomplete="off"
+                                data-bind="textInput: student,
+                                           disable: $component.isReadOnly(),
+                                           attr: {id: 'question-sa-'+id}"
+                            />
+                        </div>
+                    </div>
+                    <div data-bind="case: 'essay_question'">
+                        <textarea
+                            data-bind="textInput: student,
+                                           disable: $component.isReadOnly(),
+                                           attr: {id: 'question-es-'+id}"
+                            style="width: 100%; height: 300px"
+                            autocomplete="off"
+                        ></textarea
+                        ><br />
+                    </div>
+                    <!-- Numerical Input -->
+                    <div data-bind="case: 'numerical_question'">
+                        <div class="form-group">
+                            <input
+                                type="number"
+                                class="form-control"
+                                autocomplete="off"
+                                data-bind="textInput: student,
+                                           disable: $component.isReadOnly(),
+                                           attr: {id: 'question-num-'+id}"
+                            />
+                        </div>
+                    </div>
+                    <!-- Multiple Fill in the Blank Question -->
+                    <div
+                        data-bind="case: 'fill_in_multiple_blanks_question'"
+                    ></div>
+                    <!-- Else -->
+                    <div data-bind="case: $default">
+                        I have no idea what this is!
+                    </div>
+                </div>
+            </div>
+            <!-- ko if: feedback() && (!$component.asStudent() || $component.quiz().feedbackType() === 'IMMEDIATE') -->
+            <div
+                class="border rounded m-2 p-2"
+                data-bind="class: feedback().status == 'error' ? 'bg-dark' :
+                                                                  feedback().correct ? 'bg-success' : 'bg-danger'"
+            >
+                <span
+                    data-bind="html: feedback().message"
+                    class="text-white"
+                ></span>
+            </div>
+            <!-- /ko -->
+        </div>
+    </div>
+    <!-- /ko -->
+    <!-- /ko -->
+
+    <!-- ================================================================ -->
+    <!-- Question Group: grid of horizontal MCQs that share their answers -->
+    <!-- ================================================================ -->
+    <!-- ko if: kind === 'group' -->
+    <div
+        class="card m-4 quizzer-question-group"
+        data-bind="visible: $component.quiz().isItemVisible($data) || !$component.asStudent()"
+    >
+        <div class="quizzer-question card-body">
+            <h5 class="card-title" data-bind="text: label"></h5>
+            <h6 class="card-subtitle mb-2 text-muted" data-bind="visible: !$component.asStudent()">
+                Group: <span data-bind="text: group"></span>
+                (<span data-bind="text: questions.map(q => q.id).join(', ')"></span>)
+            </h6>
+            <!-- ko if: warning && !$component.asStudent() -->
+            <div class="alert alert-warning p-1 small">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span data-bind="text: warning"></span>
+            </div>
+            <!-- /ko -->
+            <div
+                class="table-responsive"
+                data-bind="visible: !$component.asStudent() || $component.quiz().attemptCount() > 0"
+            >
+                <table class="table table-sm table-borderless quizzer-group-table">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="quizzer-group-statement"></th>
+                            <!-- ko foreach: answers -->
+                            <th
+                                scope="col"
+                                class="quizzer-group-option"
+                                data-bind="markdowned: {value: $data},
+                                           style: {width: (60 / $parent.answers.length) + '%'}"
+                            ></th>
+                            <!-- /ko -->
+                        </tr>
+                    </thead>
+                    <tbody data-bind="foreach: questions">
+                        <tr
+                            class="quizzer-group-row"
+                            data-bind="visible: visible() || !$component.asStudent()"
+                        >
+                            <th scope="row" class="quizzer-group-statement">
+                                <span data-bind="attr: {id: 'quizzer-question-anchor-'+id}"></span>
+                                <!-- ko if: $data.editing() -->
+                                <textarea
+                                    data-bind="markdowneditor: {value: $data.rawBody}"
+                                    style="width: 100%; height: 120px"
+                                ></textarea>
+                                <!-- /ko -->
+                                <span
+                                    class="quizzer-group-body"
+                                    data-bind="visible: !$data.editing(),
+                                               markdowned: {value: body}"
+                                ></span>
+                                <small class="text-muted text-nowrap" data-bind="visible: !$component.asStudent()">
+                                    <span data-bind="text: '('+id+')'"></span>
+                                    <!-- ko if: pool() -->
+                                    Pool: <span data-bind="text: pool().name"></span>
+                                    <!-- /ko -->
+                                    <button
+                                        class="btn btn-sm btn-link p-0 ml-1"
+                                        data-bind="click: ()=>$component.changeEditing($data, true),
+                                                   visible: $data.editing()"
+                                    >Save</button>
+                                    <button
+                                        class="btn btn-sm btn-link p-0 ml-1"
+                                        data-bind="click: ()=>$component.changeEditing($data, false),
+                                                   text: $data.editing() ? 'Cancel' : 'Edit'"
+                                    ></button>
+                                </small>
+                                <!-- ko if: $component.quiz().gradeMode() !== 'SURVEY' -->
+                                <small class="text-muted text-nowrap">
+                                    <!-- ko if: feedback() && (!$component.asStudent() || $component.quiz().feedbackType() === 'IMMEDIATE') -->
+                                    <span
+                                        data-bind="text: Math.round(((feedback().score * points) + Number.EPSILON) * 100) / 100 + ' /'"
+                                    ></span>
+                                    <!-- /ko -->
+                                    <span data-bind="text: points"></span> points
+                                </small>
+                                <!-- /ko -->
+                            </th>
+                            <!-- ko foreach: $parent.answers -->
+                            <td class="quizzer-group-option">
+                                <input
+                                    data-bind="checked: $parent.student,
+                                               value: $data,
+                                               disable: $component.isReadOnly(),
+                                               attr: {name: 'question-mcq-'+$parent.id,
+                                                      id: 'question-mcq-'+$parent.id+'-'+$index(),
+                                                      'aria-label': $data}"
+                                    class="form-check-input"
+                                    type="radio"
+                                />
+                            </td>
+                            <!-- /ko -->
+                        </tr>
+                        <!-- ko if: feedback() && (!$component.asStudent() || $component.quiz().feedbackType() === 'IMMEDIATE') -->
+                        <tr data-bind="visible: visible() || !$component.asStudent()">
+                            <td data-bind="attr: {colspan: 1 + $parent.answers.length}">
+                                <div
+                                    class="border rounded p-2"
+                                    data-bind="class: feedback().status == 'error' ? 'bg-dark' :
+                                                      feedback().correct ? 'bg-success' : 'bg-danger'"
+                                >
+                                    <span
+                                        data-bind="html: feedback().message"
+                                        class="text-white"
+                                    ></span>
+                                </div>
+                            </td>
+                        </tr>
+                        <!-- /ko -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <!-- /ko -->
+</div>

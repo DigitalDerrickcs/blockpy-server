@@ -1,0 +1,134 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Make Forks
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+
+</script>
+
+
+<script type="text/javascript">
+</script>
+
+{% endblock %}
+
+{% block body %}
+
+    <h1>Make Forks</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert-warning">
+            {% for message in messages %}
+                {{ message|safe }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This page allows you to fork an assignment over to other courses that you have access to.
+    </p>
+
+    <p>
+        This will create a new assignment group in the target course, and then create a new assignment in that group for each assignment in the original group.
+        The new assignments will have the same content as the original assignments, but will be in the target course.
+        You can change the name (user visible) and URL (internal) of the new assignment group.
+        The URLs must be unique across all courses! The system will not let you create a fork if the URLs are not unique.
+    </p>
+
+    <p>
+        <label for="assignment_group_id">Currently Forking Assignment Group:</label>
+        <form action="" method="GET">
+        <input type="hidden" name="course_id" value="{{ course_id }}">
+        <select name="assignment_group_id" id="assignment_group_id" class="form-control" onchange="this.form.submit()">
+            <option value="">Select an assignment group...</option>
+            {% for group in possible_groups %}
+                <option value="{{ group.id }}" {{ 'selected' if group.id == group_id }}>
+                    {{ group.name }}
+                </option>
+            {% endfor %}
+        </select>
+        </form>
+    </p>
+
+    <form action="" method=post>
+
+        <!-- Assignment Group Details -->
+        <input type="hidden" name="assignment_group_id" value="{{ assignment_group.id }}">
+        <div class="form-group row">
+            <label for="new_assignment_group_name" class="col-sm-2 col-form-label">Assignment Group Name:</label>
+            <div class="col-sm-6">
+                <strong>{{ assignment_group.name }}</strong>
+                <input type="text" name="new_assignment_group_name" value="{{ assignment_group.name }}"
+                    class="form-control">
+            </div>
+        </div>
+        <div class="form-group row">
+            <label for="new_assignment_group_url" class="col-sm-2 col-form-label">Assignment Group URL:</label>
+            <div class="col-sm-6">
+                <a href="{{ url_for("assignments.load", assignment_group_url=assignment_group.url) }}" target="_blank"><code>{{ assignment_group.url }}</code></a>
+                <input type="text" name="new_assignment_group_url" value="{{ assignment_group.url }}"
+                    class="form-control">
+            </div>
+        </div>
+
+
+        <!-- Course dropdown for target course -->
+        <div class="form-group row">
+            <label for="course_id" class="col-sm-2 col-form-label">Target Course:</label>
+            <div class="col-sm-6">
+                <select name="target_course_id" id="target_course_id" class="form-control">
+                    <option value="">Select a course...</option>
+                    {% for course in editable_courses %}
+                        <option value="{{ course.id }}">{{ course.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <!-- Assignments with their new URLs -->
+        <h4>Assignments</h4>
+        <table class="table table-striped table-bordered table-hover">
+            <tr>
+                <th class="col-sm-1">Assignment Name</th>
+                <th>Current URL</th>
+                <th>New URL</th>
+                <th>New Name</th>
+            </tr>
+        {% for assignment in assignments %}
+            <tr>
+                <td>{{ assignment.name }}</td>
+                <td><a href="{{ url_for("assignments.load", assignment_url=assignment.url) }}" target="_blank"><code>{{ assignment.url }}</code></a></td>
+                <td><input type="text" name="new_url[{{ assignment.id }}]" value="{{ assignment.url }}" class="form-control"></td>
+                <td><input type="text" name="new_name[{{ assignment.id }}]" value="{{ assignment.name }}" class="form-control"></td>
+            </tr>
+        {% endfor %}
+        </table>
+
+        <input type="submit" value="Create Fork" class="btn btn-success">
+        <small>If the URLs are not unique, then the forks will not be created (but we will tell you which ones are the problem).</small>
+    </form>
+
+    <hr>
+
+    <h4>Current Existing Forks</h4>
+    <ul>
+    {% for fork in existing_forks %}
+        <li>
+            <strong>Course ID {{ fork.course_id }}:</strong> <a href="{{ url_for("assignments.load", assignment_group_url=fork.url, course_id=fork.course_id) }}" target="_blank">{{ fork.name }} (<code>{{ fork.url }}</code>)</a>
+        </li>
+    {% endfor %}
+    </ul>
+
+{% endblock %}

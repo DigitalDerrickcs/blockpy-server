@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="BlockPy">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <!-- The above 3 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+    <title>Quiz Report</title>
+</head>
+{% macro answer_table(question, values) %}
+    <table class="table table-condensed table-striped table-hover table-bordered table-sm">
+    <thead>
+        <tr>
+            <th>Answer</th>
+            <th>Correct?</th>
+            <th>Raw Count</th>
+            <th>Sample Percent</th>
+            <th>Population Percent</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for value, outcome in values.items()|sort(attribute='1.1') %}
+        <tr>
+            <td><code title="{{ value|escape }}">{{ value|safe }}</code></td>
+            <td>{{ outcome[0] }}</td>
+            <td>{{ outcome[1] }}</td>
+            <td>{{ '%0.2f'|format(100*outcome[2]) }}%</td>
+            <td>{{ '%0.2f'|format(100*outcome[3][0]) }}% - {{ '%0.2f'|format(100*outcome[3][1]) }}%</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+    </table>
+{% endmacro %}
+<body>
+    <div class="container-fluid" role='main'>
+        {% for question_id, question in stats.items() %}
+            <div>
+                <h3>{{ question_id }}</h3>
+                <div style="margin-left: 2em; border: 1px solid lightgray; padding: 4px">
+                    <div title="{{ question.body|escape }}">{{ question.body|safe }}</div>
+                </div>
+                <p>
+                    <strong>Type: </strong> {{ question.type }}<br>
+                    <strong>Points: </strong> {{ question.points_possible }}<br>
+                    <strong>Submissions: </strong> {{ question.scores|length }}<br>
+                    <strong>Difficulty: </strong> {{ '%0.2f'|format(100-100*(question.difficulty or 0)) }}%<br>
+                    <strong>Discrimination: </strong> {{ '%0.2f'|format(100*(question.discrimination or 0)) }}%<br>
+                </p>
+                {% if question.per_part_stats|length == 1 and None in question.per_part_stats %}
+                    {{ answer_table(question, question.per_part_stats[None])}}
+                {% else %}
+                    <ul>
+                    {% if question.per_part_stats %}
+                    {% for key, values in question.per_part_stats.items() %}
+                        <li><code title="{{ key|escape  }}">{{ key|safe }}</code>
+                        {{ answer_table(question, values)}}
+                         </li>
+                    {% endfor %}
+                    {% endif %}
+                    </ul>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+</body>
+</html>

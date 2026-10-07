@@ -1,7 +1,7 @@
 import * as ko from 'knockout';
 import {Model, ModelJson, ModelStore} from "./model";
-import {capitalize, TwoWayReadonlyMap} from "../components/plugins";
-import {ajax_get} from "../components/ajax";
+import {capitalize, TwoWayReadonlyMap} from "../services/plugins";
+import {ajax_get} from "../services/ajax";
 
 export enum ServiceType {
     NATIVE= "native",
@@ -10,7 +10,8 @@ export enum ServiceType {
 
 export enum CourseVisibility {
     PRIVATE="private",
-    PUBLIC="public"
+    PUBLIC="public",
+    ARCHIVED="archived"
 }
 
 export interface CourseJson extends ModelJson {
@@ -24,6 +25,7 @@ export interface CourseJson extends ModelJson {
     visibility: CourseVisibility;
     term: string;
     settings: string;
+    locked: boolean;
 }
 
 export class Course extends Model<CourseJson> {
@@ -37,6 +39,7 @@ export class Course extends Model<CourseJson> {
     visibility: KnockoutObservable<CourseVisibility>;
     term: KnockoutObservable<string>;
     settings: KnockoutObservable<string>;
+    locked: KnockoutObservable<boolean>;
 
     FIELDS: TwoWayReadonlyMap = new TwoWayReadonlyMap({
         "name": "name",
@@ -49,12 +52,36 @@ export class Course extends Model<CourseJson> {
         "term": "term",
         "settings": "settings",
         "date_modified": "dateModified",
-        "date_created": "dateCreated"
+        "date_created": "dateCreated",
+        "locked": "locked"
     });
 
     constructor(data: CourseJson) {
         super(data);
         this.koFromJson(data);
+    }
+
+    isPinned(): boolean {
+        let settings;
+        try {
+            settings = JSON.parse(this.settings());
+        } catch (e) {
+            return false;
+        }
+        if (settings != null) {
+            return settings.pinned === true;
+        }
+    }
+
+    setSetting(key: string, value: any) {
+        let settings;
+        try {
+            settings = JSON.parse(this.settings());
+        } catch (e) {
+            settings = {};
+        }
+        settings[key] = value;
+        this.settings(JSON.stringify(settings));
     }
 }
 
@@ -88,7 +115,8 @@ export class CourseStore extends ModelStore<CourseJson, Course> {
             settings: "",
             term: "Unknown term",
             url: "",
-            visibility: null
+            visibility: null,
+            locked: false
         });
     }
 }

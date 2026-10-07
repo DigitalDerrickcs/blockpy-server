@@ -1,4 +1,4 @@
-"""empty message
+"""Add endpoint column to Reviews
 
 Revision ID: 63aeca380751
 Revises: e8052202cb3a

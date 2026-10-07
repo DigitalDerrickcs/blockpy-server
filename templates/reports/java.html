@@ -1,0 +1,46 @@
+<div xml:lang="en">
+    <h2 id='{{ assignment.slug() }}'>{{ assignment.name }}</h2>
+
+    {% set hiding = assignment.hidden or assignment.get_setting('hide_submission', False) %}
+
+<div>
+    {% if is_grader or not hiding %}
+    {{ assignment.instructions|safe }}
+    {% endif  %}
+</div>
+<hr>
+
+{%  include "reports/reviewing_interface.html" with context %}
+
+    <div>Date Created: {{ submission.date_created }}</div>
+    <div>Date Modified: {{ submission.date_modified }}</div>
+
+    {% if is_grader or not hiding %}
+    <div>Submission Status: {{ submission.submission_status }}</div>
+    <div>Grading Status: {{ submission.grading_status }}</div>
+    <div>Score Status: {{ submission.full_status(not is_grader) }}</div>
+    <div>Full Submission: <a href="{{ url_for('blockpy.load_assignment',
+                            assignment_id=submission.assignment_id,
+                            user_id=submission.user_id,
+                            course_id=submission.course_id,
+                            force_download=True,
+                            embed=True) }}">download</a></div>
+    <div>History: <a href="{{ url_for('blockpy.browse_history', assignment_id=submission.assignment_id,
+        user_id=submission.user_id, course_id=submission.course_id) }}">view</a></div>
+    {% endif %}
+
+    {% if (is_grader or not hiding) and submission.code %}
+    <div id="reviewable-code-area-{{ submission.id }}">Submitted code:<br>
+        {{ submission.code|highlight_java_code|safe }}
+        {% if submission.extra_files %}
+            {% for filename, contents in (submission.extra_files|json_load).items() %}
+                <strong>{{ filename }}</strong>
+                {{ contents|highlight_python_code|safe }}
+            {% endfor %}
+        {% endif %}
+    </div>
+
+
+
+    {% endif %}
+</div>

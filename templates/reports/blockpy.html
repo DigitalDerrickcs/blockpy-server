@@ -1,41 +1,107 @@
+{% import 'helpers/report_tools.html' as report_tools %}
+
 <h2 id='{{ assignment.slug() }}'>{{ assignment.name }}</h2>
 
 {% set hiding = assignment.hidden or assignment.get_setting('hide_submission', False) %}
 
-<div>
-    {% if is_grader or not hiding %}
-    {{ assignment.instructions|safe }}
-    {% endif  %}
+{% if is_grader or not hiding %}
+<div class="module mb-2 m-2">
+ <a class="read-more collapsed" data-toggle="collapse" href="#collapse-instructions-{{ assignment.slug() }}" role="button"></a>
+  <div class="collapse" id="collapse-instructions-{{ assignment.slug() }}" aria-expanded="false">
+    {{ assignment.instructions|markdown|safe }}
+  </div>
 </div>
-<hr>
+{% endif  %}
 
-{% if assignment.reviewed %}
-    {# include "helpers/review_interface.html" with context #}
+{%  include "reports/reviewing_interface.html" with context %}
+
+{{ report_tools.render_submission_details(submission, is_grader, hiding) }}
+
+<div class="col-md-12">
+
+{% if hiding %}
+    {% set tags = submission.get_tags() %}
+    {% if tags %}
+    <div class="alert alert-info" role="alert">
+        We recommend you check out the following lessons:
+        <ul>
+        {% for tag in tags %}
+            <li>
+            <a href="{{ url_for('assignments.load_textbook', path='bakery_textbook',
+                                    page='bakery_'+tag+'_read', embed=True) }}"
+                target="_blank">
+                {{ tag.replace('_', ' ') }}
+            </a>
+            </li>
+        {% endfor %}
+    </ul>
+    </div>
+    {% endif %}
 {% endif %}
 
-<div class="col-lg-6 col-md-12">
-<div>Submission Status: {{ submission.submission_status }}</div>
-<div>Grading Status: {{ submission.grading_status }}</div>
-<div>Score Status: {{ submission.full_status() }}</div>
-<!-- TODO: Use the LTI information to build the proper URL
-<div>Open in Canvas: <a href='' target='_blank'>View</a></div>
-<div>Instructor Link: <a href='' target='_blank'>View</a></div>
--->
-<div>Edits: {{ submission.version }}</div>
 {% if is_grader or not hiding %}
-<div>Full Submission: <a href="{{ url_for('blockpy.load_assignment',
+<div class="col-xl-6 col-md-12 mb-2">
+<form method="post" target="_blank" action="{{ url_for("blockpy.load_readonly", embed=True) }}"
+    style="display:inline">
+    <input type="hidden" name="assignment_data" value="{{
+        assignment|make_readonly_form(submission, is_grader)
+    }}">
+    <input type="hidden" name="access_token" value="{{ g.access_token }}">
+    <button type="submit" class="btn btn-sm btn-outline-secondary"
+>Load Read-only Mode</button>
+</form> Opening assignment in read-only mode will not affect your grade at all.
+</div>
+{% endif %}
+
+{% if is_grader %}
+<div class="col-xl-6 col-md-12 mb-2">
+    <a href="{{ url_for('blockpy.load_assignment',
                         assignment_id=submission.assignment_id,
                         user_id=submission.user_id,
                         course_id=submission.course_id,
                         force_download=True,
-                        embed=True) }}">download</a></div>
-<div>History: <a href="{{ url_for('blockpy.browse_history', assignment_id=submission.assignment_id,
-        user_id=submission.user_id, course_id=submission.course_id) }}">view</a></div>
+                        embed=True) }}"
+                        class="btn btn-sm btn-outline-secondary">Download Full Submission</a>
+                        Provides a JSON representation of this submission.
+</div>
 {% endif %}
+
+{% if is_grader or not hiding %}
+<div class="col-xl-6 col-md-12 mb-2">
+<script>
+        submissions.push({{ submission.encode_json()|tojson }});
+        assignments.push({{ assignment.encode_json()|tojson }});
+    </script>
+<submission-watcher params="server: server, courseId: pageCourseId,
+    user: user,
+    userIds: {{ submission.user_id|tojson }},
+    assignmentIds: {{ submission.assignment_id|tojson }},
+    defaultWatchMode: 1"></submission-watcher>
+<!--<div class="col-xl-6 col-md-12 mb-2">
+    <a href="{{ url_for('blockpy.browse_history', assignment_id=submission.assignment_id,
+            user_id=submission.user_id, course_id=submission.course_id, embed=True) }}"
+            type="button" class="btn btn-sm btn-outline-secondary"
+            >View History
+            {% if is_grader %}
+            <span class="badge badge-secondary">{{ submission.version }} edits</span>
+            {% endif %}
+            </a> Shows all events registered for this problem.
+</div>-->
+</div>
+{% endif %}
+
+<!-- TODO: Use the LTI information to build the proper URL
+<div>Open in Canvas: <a href='' target='_blank'>View</a></div>
+<div>Instructor Link: <a href='' target='_blank'>View</a></div>
+-->
+
+</div>
+<div class="col-md-12">
+
 <!--<div>Estimated Duration: {{ (submission.version/10.0)|round(2) }} minutes</div>-->
 
 {% if is_grader or not hiding %}
-<div>Submitted code:<br>
+<div id="reviewable-code-area-{{ submission.id }}">Submitted code:<br>
     {{ submission.code|highlight_python_code|safe }}
     {% if submission.extra_files %}
         {% for filename, contents in (submission.extra_files|json_load).items() %}
@@ -62,12 +128,15 @@
 {% endif %}
 
 {% if is_grader %}
-    <div><small>
+    <div>
+    {{ report_tools.render_metrics(submission, True, False) }}
+    </div>
 
+    <div><small>
+        Submission: {{ submission.id }},
         Assignment: {{ submission.assignment_id }} ({{ submission.assignment.name }}),
         User: {{ submission.user_id }} ({{ submission.user.name() }}),
         Course: {{ submission.course_id }} ({{ submission.course.name }})
-
     </small></div>
 
 {% endif %}

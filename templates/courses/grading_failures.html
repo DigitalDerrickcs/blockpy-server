@@ -1,0 +1,27 @@
+{% extends 'helpers/layout.html' %}
+
+{% block title %}
+Courses: Grading Failures
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+
+
+</script>
+{% endblock %}
+
+{% block body %}
+
+<h1>Grading Failures</h1>
+
+<p>Back to <a href="{{ url_for('courses.course', course_id=course_id) }}">Course</a></p>
+    
+{% include "helpers/submission_table.html" %}
+
+
+{% endblock %}

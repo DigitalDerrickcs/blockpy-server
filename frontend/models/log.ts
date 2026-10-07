@@ -1,6 +1,6 @@
 import * as ko from 'knockout';
 import {Model, ModelJson} from "./model";
-import {TwoWayReadonlyMap} from "../components/plugins";
+import {TwoWayReadonlyMap} from "../services/plugins";
 
 export interface LogJson extends ModelJson {
     assignment_id: number | null;
@@ -50,8 +50,6 @@ export class Log extends Model<LogJson> {
         this.koFromJson(data);
     }
 
-
-
     getAsSubmissionKey() {
         return [this.courseId(), this.subjectId(), this.assignmentId()].join(",");
     }
@@ -59,14 +57,25 @@ export class Log extends Model<LogJson> {
     isEditEvent() {
         return (this.eventType() === "File.Edit" || this.eventType() === "File.Create");
     }
+
+    when() {
+        return this.clientTimestamp() || this.dateCreated();
+    }
 }
 
+// TODO: Finish processing all event types
 export const REMAP_EVENT_TYPES: Record<string, string> = {
     "Session.Start": "Began session",
     "X-IP.Change": "Changed IP address",
     "File.Edit": "Edited code",
-    "File.Create": "Started assignment",
+    "File.Create": "Created submission",
     "Run.Program": "Ran program",
     "Compile.Error": "Syntax error",
-    "X-Submission.LMS": "Updated grade"
+    "X-Submission.LMS": "Updated grade",
+    "start_timer": "Started timer",
+    "X-View.Submission": "Viewed submission",
+    "X-Quiz.Grade.Failure": "Failed while grading quiz",
+    "error": "System Error",
+    "extend_time": "Instructor Extended Time Limit",
+    "timer_expired": "Timer Expired (Exam Locked)"
 };

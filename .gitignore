@@ -1,22 +1,60 @@
+.env
+.env.db
+
+conf/nginx/nginx.conf
+conf/.env.dev.db
+conf/.env.prod.db
+conf/.env.dev
+conf/.env.prod
+
+docs/~*
+
+# Prevent committing server-side files
 kennel.sock
 
+# The per-installation config for flask
+instance/*
+!instance/configuration.py.template
+!instance/certs/
+instance/certs/*
+!instance/certs/.gitkeep
+
+# Frontend
+node_modules/
+
+# Virtual environment
 venv/
+venv_old/
 env/
 
-static/.webassets-cache/
-static/gen/
-static/uploads/
+# Certain static files
+static/.webassets-cache/*
+static/.webassets-cache/.gitkeep
+static/gen/*
+!static/gen/.gitkeep
+static/uploads/*
+!static/uploads/submission_blocks/
+static/uploads/submission_blocks/*
+!static/uploads/submission_blocks/.gitkeep
+!static/uploads/.gitkeep
 static/canvas/
+static/reports/*
+!static/reports/.gitkeep
+static/public/*
+!static/public/.gitkeep
 
+# Databases, logs, etc.
 database/
-tests/
-logs/
+logs/*
+!logs/.gitkeep
 log/
 queued_logs/
-backups/
+backups/*
+!logs/.gitkeep
 
 kennel.wsgi
-certs/
+certs/*
+!certs/.gitkeep
 settings/*.json
 settings/*.yaml
 

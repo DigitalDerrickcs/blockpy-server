@@ -1,0 +1,99 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Edit Assignment Group Security Settings
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+<script type='text/javascript'>
+$(document).ready(function() {
+    const editableRanges  = document.getElementById("ip_ranges");
+    editableRanges.addEventListener("input", updateRanges, false);
+    updateRanges();
+});
+
+const VALID_NETWORK = /^[!^]?(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\/([1-2][0-9]|3[0-2]|[0-9]))?$/;
+
+function updateRanges() {
+    const foundRanges  = document.getElementById("found-ranges");
+    const editableRanges  = document.getElementById("ip_ranges");
+    foundRanges.innerHTML = editableRanges.value.split(",").filter(x => x).map(value => {
+        if (value.match(VALID_NETWORK)) {
+            return `<li><code class="h3 badge badge-success">${value}</code> is good!</li>`;
+        } else {
+            return `<li><code class="h3 badge badge-danger">${value}</code> may not be a valid IP address?</li>`;
+        }
+    }).join("\n");
+}
+</script>
+
+{% endblock %}
+
+{% block body %}
+
+    <h1>Edit Security Settings</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="alert alert-warning">
+            {% for message in messages %}
+                {{ message|safe }}<br>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <p>
+        This page allows you to edit the security for a given assignment.
+        You should only do this if you know what you are doing and have been
+        given explicit instructions to do so. Tampering with exam security
+        settings can result in academic misconduct charges.
+    </p>
+
+    {% if group_name != None %}
+    <p>Assignment: {{group_name}}</p>
+    <p>{{ warning }}</p>
+
+    <form action="" method=post>
+        {% if is_instructor %}
+        <div class="form-group row">
+            <label for="passcode" class="col-sm-1 col-form-label">Passcode:</label>
+            <div class="col-sm-6">
+                <input type="text" name="passcode" value="{{ passcode }}"
+                    class="form-control">
+            </div>
+        </div>
+        {% endif %}
+        <div class="form-group row">
+            <label for="ip_ranges" class="col-sm-1 col-form-label">IP Ranges:</label>
+            <div class="col-sm-6">
+                <input type="text" name="ip_ranges" id="ip_ranges" value="{{ ip_ranges }}"
+                    class="form-control">
+                <br>
+                <ul id="found-ranges"></ul>
+            </div>
+        </div>
+        <div class="form-group row">
+            <label for="ip_ranges" class="col-sm-1 col-form-label">Protected IP Ranges:</label>
+            <div class="col-sm-6">
+                {% if is_instructor %}
+                <input type="text" name="protected_ip_ranges" id="protected_ip_ranges" value="{{ protected_ip_ranges }}"
+                    class="form-control">
+                {% else %}
+                    <code>{{ protected_ip_ranges }}</code>
+                {% endif %}
+            </div>
+        </div>
+
+        <input type="submit" value="Save updates" class="btn btn-success">
+    </form>
+    {% endif %}
+
+
+{% endblock %}

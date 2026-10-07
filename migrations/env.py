@@ -24,7 +24,7 @@ logger = logging.getLogger('alembic.env')
 from flask import current_app
 config.set_main_option(
     'sqlalchemy.url', current_app.config.get(
-        'SQLALCHEMY_DATABASE_URI').replace('%', '%%'))
+        'SQLALCHEMY_DATABASE_URI_ALEMBIC').replace('%', '%%'))
 
 target_metadata = current_app.extensions['migrate'].db.metadata
 
@@ -49,7 +49,9 @@ def run_migrations_offline():
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url, target_metadata=target_metadata, literal_binds=True,
-        include_schemas=True
+        include_schemas=True,
+        compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
@@ -81,12 +83,17 @@ def run_migrations_online():
     )
 
     with connectable.connect() as connection:
+        # Newer flask-migrate already supplies compare_type via
+        # configure_args; setdefault avoids the duplicate-kwarg crash.
+        conf_args = dict(current_app.extensions['migrate'].configure_args)
+        conf_args.setdefault('compare_type', True)
+        conf_args.setdefault('compare_server_default', True)
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
             process_revision_directives=process_revision_directives,
             include_schemas=True,
-            **current_app.extensions['migrate'].configure_args
+            **conf_args
         )
 
         with context.begin_transaction():

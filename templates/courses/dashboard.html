@@ -8,18 +8,107 @@ Dashboard
 {% endblock %}
 
 {% block extrahead %}
+
+
+    <script>
+
+        $(document).ready(function() {
+            if (inIframe()) {
+                $("#relaunch-login button").click(()=>relaunchInWindow());
+                $("#relaunch-login").show();
+
+                {% for textbook in textbooks %}
+                    $("#load-textbook-{{ textbook.url }}").click((event) => {
+                        relaunchInWindow({{ url_for('assignments.load', _external=True, assignment_url=textbook.url,course_id=g.course.id,
+                        grade_mode='textbook')|tojson }});
+                        event.preventDefault();
+                    });
+                {% endfor %}
+
+                $("#launch-scratchpad").click((event) => {
+                    relaunchInWindow({{ url_for('assignments.load', _external=True, course_id=g.course.id)|tojson }});
+                        event.preventDefault();
+                })
+
+                // Submission links need an LTI launch, since cookies may not work from inside the iframe
+                $("a[data-relaunch-url]").click((event) => {
+                    relaunchInWindow($(event.currentTarget).data("relaunch-url"));
+                    event.preventDefault();
+                });
+            }
+        });
+
+    </script>
 {% endblock %}
 
 {% block body %}
 
     <h1>Dashboard</h1>
 
-    <p>Welcome to your dashboard!</p>
+    <p>Hello {{ g.user.name() }}, you are in "{{ g.course.name }}".</p>
 
-    <p>This feature is in beta. Expect issues!</p>
+    <div class="row">
 
-    {% include "helpers/submission_table.html" %}
 
-    <p>Currently in "{{ g.course.name }}"</p>
+
+        <!-- Textbooks -->
+        {% if textbooks %}
+        <div class="col-sm-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Textbook{{ 's' if textbooks|length > 1 else '' }}</h5>
+                    <p class="card-text">See an overview of the entire textbook, including later chapters!</p>
+                    {% for textbook in textbooks %}
+                    <a href="{{ url_for('assignments.load_textbook', path=textbook.url, course_id=g.course.id, embed=True) }}"
+                       target="_blank"
+                       class='btn btn-primary' id="load-textbook-{{ textbook.url }}">Read {{ textbook.name }}</a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="col-sm-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">BlockPy Scratchpad</h5>
+                    <p class="card-text">Need a place to quickly run some BlockPy code and experiment? Get a reusable scratchpad!</p>
+                    <a href="{{ {"force_default_assignment":"true"}|modify_query }}" class="btn btn-primary" id="launch-scratchpad">BlockPy Scratchpad</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Exam Time -->
+        <div class="col-sm-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Exam Time</h5>
+                    <p class="card-text">Check how much time you will have on exams, including any extra time accommodations set for you.</p>
+                    <a href="{{ url_for('courses.exam_time', course_id=g.course.id) }}" class="btn btn-primary" id="check-exam-time">Check Exam Time</a>
+                </div>
+            </div>
+        </div>
+
+
+
+    </div>
+
+    <h2>Previous Submissions</h2>
+
+    <p>Below are all the previously submitted assignments that we have found for you in this course. Click one to view the submission you made for it.</p>
+
+    {% include "helpers/submission_student_table.html" %}
+
+    <p class="text-muted"><small>If you need help, share these with your instructor:
+        User ID {{ g.user.id }}, Course ID {{ g.course.id }}.</small></p>
+
+    <details id="relaunch-login" style="display:none;">
+    <summary>Extra Tools for Logging In</summary>
+    <div>
+        If third party cookies are not enabled correctly in your browser, then you may need to relaunch this page.
+        Click this button to relaunch this outside of Canvas (should log you in with cookies).
+        <button class="btn btn-primary">Relaunch</button>
+    </div>
+    </details>
 
 {% endblock %}

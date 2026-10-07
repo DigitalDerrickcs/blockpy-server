@@ -8,6 +8,11 @@ Course: {{ course.name }}
 {% endblock %}
 
 {% block extrahead %}
+    <style>
+        .additional-settings td {
+            padding: .1rem;
+        }
+    </style>
 <script type='text/javascript'>
 
 function renameCourse() {
@@ -21,32 +26,148 @@ function renameCourse() {
 {% endblock %}
 
 {% block body %}
+    <h1>Course: {{ course.name }}</h1>
+    <div>
+        <a href="{{ url_for('courses.index') }}">Back to all courses</a><br><br>
+    </div>
 
-<h1>Course: {{ course.name }}</h1>
-
-<a href="{{ url_for('courses.index') }}">Back to all courses</a><br><br>
+    <p>
+        Welcome to {{ course.name }} (Course URL: <code>{{ course.url }}</code>, Course ID: <code>{{ course.id }}</code>)
+    </p>
 
 {% if is_instructor %}
-<a href="{{ url_for('courses.assignments', course_id=course.id) }}" class='btn btn-outline-secondary'>Manage Assignments</a> Create, edit, reorganize, and remove assignments.<br><br>
-<a href="{{ url_for('assignments.bulk_upload', course_id=course.id) }}" class='btn btn-outline-secondary'>Import Assignments</a> Load assignments exported from another course.<br><br>
-<a href="{{ url_for('courses.manage_users', course_id=course.id) }}" class='btn btn-outline-secondary'>Manage Students</a> Add, edit, and remove the students who are in your course.<br><br>
-<button onclick="renameCourse()" class='btn btn-outline-secondary'>Rename Course</button> Rename this course.<br><br>
-{% else %}
-<a href="{{ url_for('courses.view_assignments', course_id=course.id) }}" class='btn btn-outline-secondary'>View Assignments</a> View all the available assignments for this course.<br><br>
+<h3>Assignments</h3>
+    <div class="instructor-only-tools p-2">
+    <small>Instructor Tools (not visible to students or TAs)</small><br>
+    <a href="{{ url_for('courses.assignments', course_id=course.id) }}" class='btn btn-outline-secondary'>Manage Assignments</a> Create, edit, reorganize, and remove assignments.<br><br>
+    <a href="{{ url_for('courses.edit_points', course_id=course.id) }}" class='btn btn-outline-secondary'>Edit Points</a> Bulk Edit Points for assignments.<br><br>
+    <a href="{{ url_for('courses.edit_settings', course_id=course.id) }}" class='btn btn-outline-secondary'>Edit Settings</a> Bulk Edit other settings for assignments.<br><br>
+    <a href="{{ url_for('assignment_group.forking_menu', course_id=course.id) }}" class='btn btn-outline-secondary'>Make Forks</a> Copy assignments to other courses.<br><br>
+    <a href="{{ url_for('courses.adopt_assignments', course_id=course.id) }}" class='btn btn-outline-secondary'>Adopt Assignments</a> Reuse assignments and groups from other courses in this course, without copying them.<br><br>
+    <a href="{{ url_for('assignments.bulk_upload', course_id=course.id) }}" class='btn btn-outline-secondary'>Import Assignments</a> Load assignments exported from another course.<br><br>
+    <a href="{{ url_for('courses.export', course_id=course.id) }}" class="btn btn-outline-secondary">Export Assignments</a> Export all the assignments and groups owned by this course.<br><br>
+    </div>
+    <h3>Users</h3>
+    <div class="instructor-only-tools p-2">
+    <small>Instructor Tools (not visible to students or TAs)</small><br>
+    <a href="{{ url_for('courses.manage_users', course_id=course.id) }}" class='btn btn-outline-secondary'>Manage Students</a> Add, edit, and remove the students who are in your course.<br><br>
+    </div>
 {% endif %}
-
 
 {% if is_grader %}
-<a href="{{ url_for('courses.submissions_user', course_id=course.id, owner_id=g.user.id) }}" class='btn btn-outline-secondary'>View Assignments as Student</a> View assignments as if you were a student<br><br>
-<a href="{{ url_for('courses.submissions_filter', course_id=course.id) }}" class='btn btn-outline-secondary'>View Submissions</a> Old-style review and grade all student submissions<br><br>
+    <h3>Student Submissions</h3>
+    <div class="instructor-only-tools p-2">
+    <small>Grader Tools (not visible to students)</small><br>
+    <a href="{{ url_for('courses.submissions_filter', course_id=course.id) }}" class='btn btn-outline-secondary'>View Submissions</a> Old-style review and grade all student submissions<br><br>
     <a href="{{ url_for('courses.watch_events', course_id=course.id) }}" class='btn btn-outline-secondary'>Watch Submissions</a> New-style review and grade all student submissions<br><br>
-{%  endif %}
+    <a href="{{ url_for('courses.submissions_grid', course_id=course.id) }}" class='btn btn-outline-secondary'>View Grid</a> See all your students' assignment submissions' status in a big table.<br><br>
+    <a href="{{ url_for('courses.list_grading_failures', course_id=course.id) }}" class='btn btn-outline-secondary'>List Grading Failures</a> Review any students' submissions that triggered an error on the way to Canvas.<br><br>
+    <a href="{{ url_for('courses.check_similar', course_id=course.id) }}" class='btn btn-outline-secondary'>Check for Similar Submissions</a> Review all students' submissions for similarity with other submissions (across all courses).<br><br>
+    <a href="{{ url_for('courses.bulk_groups', course_id=course.id) }}" class='btn btn-outline-secondary'>Bulk Group Editor</a> Experimental interface to allow bulk download/upload of student submissions with assignment groups.<br><br>
+        <a href="{{ url_for('grading.review_editor', course_id=course.id) }}" class='btn btn-outline-secondary'>Review Editor</a> Manually grade submissions on specific submissions.<br><br>
+    <a href="{{ url_for('courses.manage_time', course_id=course.id) }}" class='btn btn-outline-secondary'>Manage Time Limits</a> Add, edit, and remove extra time for students on exams.<br><br>
+    <a href="{{ url_for('courses.feedback_editor', course_id=course.id) }}" class='btn btn-outline-secondary'>Feedback Editor</a> Review, edit, and publish students' personalized feedback for Feedback assignments.<br><br>
+    <a href="{{ url_for('courses.quiz_analysis', course_id=course.id) }}" class='btn btn-outline-secondary'>Quiz Analysis</a> Item analysis of a quiz's submissions: score distribution, question difficulty and discrimination, and which answers students chose.<br><br>
+    </div>
+    <h3>Your Assignments</h3>
+    <small>Not visible to anyone else</small><br>
+    <a href="{{ url_for('courses.view_assignments', course_id=course.id) }}" class='btn btn-outline-secondary'>View Assignments as Student</a> View all the available assignments for this course as if you were a student.<br><br>
+    <a href="{{ url_for('courses.submissions_user', course_id=course.id, owner_id=g.user.id) }}" class='btn btn-outline-secondary'>View Your Submissions as Student</a> View your submissions as if you were a student<br><br>
+{% else %}
+    <a href="{{ url_for('courses.view_assignments', course_id=course.id) }}" class='btn btn-outline-secondary'>View Assignments</a> View all the available assignments for this course.<br><br>
+    <a href="{{ url_for('courses.submissions_user', course_id=course.id, owner_id=g.user.id) }}" class='btn btn-outline-secondary'>View Your Submissions</a> View your submissions for all of the assignments.<br><br>
+    {# Don't include Lapis Feedback just yet (the lapis blueprint is not registered)
+    <a href="{{ url_for('lapis.student_feedback', course_id=course.id) }}" class='btn btn-outline-secondary'>Feedback</a> Personalized feedback from your instructor.<br><br>
+    #}
+{% endif %}
+
+    <h3>Textbook{{ 's' if textbooks|length > 1 else '' }}</h3>
+{% if textbooks %}
+    {% for textbook in textbooks %}
+    View the textbook: <a href="{{ url_for('assignments.load_textbook', path=textbook.url, course_id=course.id, embed=False) }}" class='btn btn-outline-secondary'>{{ textbook.name }}</a><br><br>
+    {% endfor %}
+    {% if is_instructor %}
+    <div class="instructor-only-tools p-2">
+        <small>Instructor Tools (not visible to students or TAs)</small><br>
+        <a href="{{ url_for('courses.edit_textbooks', course_id=course.id) }}" class='btn btn-outline-secondary'>Edit Textbooks</a> Edit the textbook settings.<br><br>
+    </div>
+    {% endif %}
+{% else %}
+    {% if is_instructor %}
+        <div class="instructor-only-tools p-2">
+        <small>Instructor Tools (not visible to students or TAs)</small><br>
+        <a href="{{ url_for('courses.edit_textbooks', course_id=course.id) }}" class='btn btn-outline-secondary'>Edit Textbooks</a> Add a textbook.<br><br>
+        </div>
+    {% else %}
+        <div>This course does not have a textbook.</div>
+    {% endif %}
+{% endif %}
 
 {% if is_instructor %}
+<h3>Course Settings</h3>
+    <div class="instructor-only-tools p-2">
+    <small>Instructor Tools (not visible to students or TAs)</small><br>
+    <div class="ml-4">
+    <a href="{{ url_for('courses.edit', course_id=course.id) }}" class='btn btn-outline-secondary'>Edit Settings</a> Edit top-level course settings (visiblity, url, name, etc.).<br><br>
+    <strong>Settings:</strong>
+    <ul>
+    <li>Course name: <code>{{ course.name }}</code> <button onclick="renameCourse()" class='btn btn-outline-secondary btn-sm' title="Rename this course to something else.">Rename Course</button></li>
+    <li>Course url: <code>{{ course.url if course.url else "N/A" }}</code></li>
+    <li>Course id: <code>{{ course.id }}</code></li>
+    <li>Owner: <code>{{ course.owner and course.owner.name() }}</code> (<code>{{ course.owner_id }}</code>)</li>
+    <li>Visibility: <code>{{ course.visibility.title() }}</code></li>
+    <li>Lock status: <code>{{ 'Locked for editing' if course.locked else 'Unlocked' }}</code></li>
+    <li>Created: <code>{{ course.date_created|date_description }}</code></li>
+    <li title="When this course's settings were last updated (but not necessarily the contents of the course)">
+        Last Edited: <code>{{ course.date_modified|date_description }}</code></li>
+    {% if course.service != 'native' and course.service %}
+    <li><details>
+    <summary>LTI LMS: <code>{{ course.service.title() }}</code></summary>
+        <p>
+            <span>LTI Course ID: <code>{{ course.external_id }}</code></span><br>
+            <span>LTI Endpoint: <code>{{ course.endpoint }}</code></span><br>
+        </p>
+    </details></li>
+        </ul>
+    {% endif %}
+    {% set settings = course.get_all_settings() %}
+    {% if settings %}
+        <strong>Additional Settings:</strong>
+        <table class="table table-condensed table-striped table-responsive additional-settings">
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+            {% for k, v in settings.items() %}
+            <tr>
+                <td><code>{{ k }}</code></td>
+                <td>{{ v|highlight_json|safe }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        <details>
+            <summary>Show raw additional settings:</summary>
+            {{ settings|highlight_json|safe }}
+        </details>
+    {% endif %}
+    </div>
+    </div>
 
-<h3>Special Commands</h3>
-
-<a href="{{ url_for('courses.remove_course', course_id=course.id) }}" onclick="return confirm('Are you sure?')" class='btn btn-danger'>Delete Course</a><br><br>
-
+    <h3>Visibility Settings</h3>
+    <div class="instructor-only-tools p-2">
+    <a href="{{ url_for('courses.change_course_visibility', course_id=course.id, visibility='public') }}"
+       onclick="return confirm('Are you sure?')" class='btn btn-outline-secondary'>Make Course Public</a> Changes the visibility
+        of the course to "Public", which means it will be available to anyone visiting the main BlockPy site. Public
+        courses are meant to be consumed by anyone, even if they do not have a formal role in the course.<br><br>
+    <a href="{{ url_for('courses.change_course_visibility', course_id=course.id, visibility='private') }}"
+       onclick="return confirm('Are you sure?')" class='btn btn-outline-secondary'>Make Course Private</a> Changes the visibility
+        of the course to "Private", which means it will no longer show up in public course lists on the site. It will
+        still be accessible if folks know the direct link.<br><br>
+    <a href="{{ url_for('courses.change_course_visibility', course_id=course.id, visibility='archive') }}"
+       onclick="return confirm('Are you sure?')" class='btn btn-danger'>Archive Course</a> Changes the visibility
+        of the course to "Archived", which means it will no longer show up in your course lists. This does not affect
+        whether people can view private courses, but does affect public course access in some small ways.<br><br>
+    </div>
 {% endif %}
+
 {% endblock %}

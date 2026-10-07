@@ -1,0 +1,233 @@
+﻿<style>
+.assignment-manager .btn-group {
+    display: flex;
+}
+
+.assignment-manager .table-hover tbody tr:hover td, .assignment-manager .table-hover tbody tr:hover th {
+    background-color: #e9eaed;
+}
+
+.assignment-manager tr:hover.hover-movers-rows div.mover-buttons,
+.assignment-manager tr:hover.hover-remove-rows div.hide-buttons {
+    visibility: visible;
+}
+
+.assignment-manager tr.hover-movers-rows div.mover-buttons,
+.assignment-manager tr.hover-remove-rows div.hide-buttons {
+    visibility: hidden;
+}
+
+/* Per-type accent colors: the icon takes the color as text, the badge as background */
+.assignment-manager .fas.assignment-type-blockpy { color: #0069d9; }
+.assignment-manager .badge.assignment-type-blockpy { background-color: #0069d9; }
+.assignment-manager .fas.assignment-type-reading { color: #28a745; }
+.assignment-manager .badge.assignment-type-reading { background-color: #28a745; }
+.assignment-manager .fas.assignment-type-textbook { color: #1a9c75; }
+.assignment-manager .badge.assignment-type-textbook { background-color: #1a9c75; }
+.assignment-manager .fas.assignment-type-quiz { color: #6f42c1; }
+.assignment-manager .badge.assignment-type-quiz { background-color: #6f42c1; }
+.assignment-manager .fas.assignment-type-typescript { color: #17a2b8; }
+.assignment-manager .badge.assignment-type-typescript { background-color: #17a2b8; }
+.assignment-manager .fas.assignment-type-java { color: #8d5524; }
+.assignment-manager .badge.assignment-type-java { background-color: #8d5524; }
+.assignment-manager .fas.assignment-type-explain { color: #e83e8c; }
+.assignment-manager .badge.assignment-type-explain { background-color: #e83e8c; }
+.assignment-manager .fas.assignment-type-feedback { color: #e8590c; }
+.assignment-manager .badge.assignment-type-feedback { background-color: #e8590c; }
+.assignment-manager .fas.assignment-type-maze { color: #dc3545; }
+.assignment-manager .badge.assignment-type-maze { background-color: #dc3545; }
+.assignment-manager .fas.assignment-type-default { color: #6c757d; }
+.assignment-manager .badge.assignment-type-default { background-color: #6c757d; }
+
+.assignment-manager .badge.content-badge {
+    background-color: #e9ecef;
+    color: #495057;
+    font-weight: normal;
+}
+
+.assignment-manager .assignment-flags .badge.status-badge {
+    background-color: transparent;
+    border: 1px solid #ced4da;
+    color: #868e96;
+    font-weight: normal;
+}
+
+div.overlay {
+    height: 100%;
+    width: 100%;
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    background-color: rgba(16, 16, 16, 0.5);
+    overflow-x: hidden;
+    transition: 0.5s;
+}
+</style>
+
+<div class="assignment-manager">
+    <div class="overlay" style="display: none;"></div>
+
+    <div class="mb-2">
+        <a href="#" data-toggle="modal" data-target="#assignment-create" class="btn btn-outline-secondary btn-sm">
+            <span class="fas fa-plus" aria-hidden="true"></span> Create Assignment</a>
+        &nbsp;
+        <a href="#" data-toggle="modal" data-target="#group-create" class="btn btn-outline-secondary btn-sm">
+            <span class="fas fa-folder-plus" aria-hidden="true"></span> Create Group</a>
+    </div>
+
+    <div class="form-inline mb-3">
+        <label class="mr-1" for="assignment-manager-search">Search:</label>
+        <input type="text" id="assignment-manager-search" class="form-control form-control-sm mr-3"
+               placeholder="Filter by name, url, or type" data-bind="textInput: filterText">
+        <label class="mr-1" for="assignment-manager-sort">Sort groups by:</label>
+        <select id="assignment-manager-sort" class="form-control form-control-sm mr-1"
+                data-bind="options: sortOptions, optionsText: 'label', optionsValue: 'key', value: sortBy, enable: groupByGroup"></select>
+        <button type="button" class="btn btn-outline-secondary btn-sm mr-3" data-bind="click: toggleSortDirection, enable: groupByGroup">
+            <span class="fas" aria-hidden="true"
+                  data-bind="css: sortDescending() ? 'fa-sort-amount-down' : 'fa-sort-amount-up'"></span>
+            <span data-bind="text: sortDescending() ? 'Descending' : 'Ascending'"></span>
+        </button>
+        <div class="form-check mr-3">
+            <input class="form-check-input" type="checkbox" id="assignment-manager-grouped"
+                   data-bind="checked: groupByGroup">
+            <label class="form-check-label" for="assignment-manager-grouped">Organize by group</label>
+        </div>
+        <span class="text-muted small" data-bind="text: countLabel"></span>
+    </div>
+
+    <div class="alert alert-danger" data-bind="visible: errorMessage, text: errorMessage" style="display: none;"></div>
+
+    <div data-bind="visible: isLoading">
+        <span class="fas fa-spinner fa-spin" aria-hidden="true"></span> Loading assignments...
+    </div>
+
+    <table class="table table-condensed table-hover" data-bind="visible: !isLoading()" style="display: none;">
+    <tbody data-bind="foreach: displayGroups">
+        <!-- ko if: $component.groupByGroup() -->
+        <tr class="table-secondary hover-remove-rows">
+            <td colspan="3">
+                <!-- ko if: group -->
+                <a href="#" data-bind="click: $component.renameGroup.bind($component, group)">
+                    <strong data-bind="text: group.name"></strong></a><br>
+                <code data-bind="text: group.url" style="color: #333"></code>
+                <a href="" data-bind="attr: {href: $component.viewGroupUrl(group)}" target="_blank"><small class="fas fa-external-link-alt"></small></a>
+                <!-- /ko -->
+                <!-- ko ifnot: group -->
+                <strong data-bind="text: title"></strong>
+                <!-- /ko -->
+            </td>
+            <td>
+                <!-- ko if: group -->
+                <div class="btn-group hide-buttons">
+                    <a target="_blank" data-bind="attr: {href: $component.viewGroupUrl(group)}" class="btn btn-primary btn-sm">View</a>
+                    <button type="button" class="btn btn-primary dropdown-toggle btn-sm" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        <span class="caret"></span>
+                        <span class="sr-only">Toggle Dropdown</span>
+                    </button>
+                    <div class="dropdown-menu">
+                        <a target="_blank" class="dropdown-item" data-bind="attr: {href: $component.editSecurityUrl(group)}">Edit Security</a>
+                        <a target="_blank" class="dropdown-item" data-bind="attr: {href: $component.forkGroupUrl(group)}">Fork Group</a>
+                        <a class="dropdown-item" href="#" data-bind="click: $component.removeGroup.bind($component, group)">Delete</a>
+                    </div>
+                </div>
+                <!-- /ko -->
+            </td>
+        </tr>
+        <!-- /ko -->
+        <!-- ko foreach: assignments -->
+        <tr class="hover-movers-rows">
+            <td style="width: 25%">
+                <strong data-bind="text: title"></strong><br>
+                <span class="fas" aria-hidden="true"
+                      data-bind="css: $component.typeIcon($data) + ' ' + $component.typeColorClass($data), attr: {title: type}"></span>
+                <span class="badge text-light" data-bind="text: type, css: $component.typeColorClass($data)"></span>
+                <code data-bind="text: url" style="color: #333"></code>
+                <a href="" data-bind="attr: {href: $component.openAssignmentUrl($data)}" target="_blank"><small class="fas fa-external-link-alt"></small></a>
+                <br>
+                <span class="small">
+                    <span data-bind="text: points() == null ? 1 : points()"></span> points &mdash;
+                    last modified <span data-bind="text: prettyDateModified, attr: {title: dateModified}"></span>
+                </span>
+            </td>
+            <td style="width: 42%">
+                <!-- ko if: $component.isReading($data) -->
+                <!-- ko with: $component.readingSummary($data) -->
+                <div>
+                    <span data-bind="text: header"></span>
+                    <span class="badge content-badge" data-bind="visible: slides">slides</span>
+                    <span class="badge content-badge" data-bind="visible: video">video</span>
+                    <span class="badge content-badge" data-bind="visible: smallLayout">small layout</span>
+                </div>
+                <span data-bind="text: summary"></span>
+                <!-- /ko -->
+                <!-- /ko -->
+                <!-- ko if: $component.isQuiz($data) -->
+                <!-- ko with: $component.quizSummary($data) -->
+                <div>
+                    <span data-bind="text: questionCount"></span> questions:
+                    <!-- ko foreach: typeCounts -->
+                    <span class="badge content-badge" data-bind="text: $data"></span>
+                    <!-- /ko -->
+                </div>
+                <div class="small text-muted" data-bind="text: questionNames"></div>
+                <div>
+                    <span class="badge content-badge" data-bind="text: gradeMode"></span>
+                    <span class="badge content-badge" data-bind="text: feedbackType"></span>
+                    <span class="badge content-badge" data-bind="visible: readingId != null, text: 'reading: ' + readingId"></span>
+                    <span class="badge content-badge" data-bind="visible: feedbackId != null, text: 'feedback: ' + feedbackId"></span>
+                </div>
+                <!-- /ko -->
+                <!-- /ko -->
+                <!-- ko if: !$component.isReading($data) && !$component.isQuiz($data) -->
+                <span data-bind="text: $component.shortInstructions($data)"></span>
+                <!-- /ko -->
+            </td>
+            <td style="width: 16%">
+                <div class="mover-buttons btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Move Group<span class="caret"></span>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right">
+                        <!-- ko if: group() != null -->
+                        <a href="#" class="dropdown-item" data-bind="click: $component.moveMembership.bind($component, $data, null)">Ungrouped Assignments</a>
+                        <div class="dropdown-divider"></div>
+                        <!-- /ko -->
+                        <!-- ko foreach: $component.sortedGroups -->
+                        <a href="#" class="dropdown-item" data-bind="click: $component.moveMembership.bind($component, $parent, $data), text: name"></a>
+                        <!-- /ko -->
+                    </div>
+                </div>
+            </td>
+            <td style="width: 17%">
+                <div class="btn-group">
+                    <a target="_blank" data-bind="attr: {href: $component.editAssignmentUrl($data)}" class="btn btn-primary btn-sm">Edit</a>
+                    <button type="button" class="btn btn-primary dropdown-toggle btn-sm" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        <span class="caret"></span>
+                        <span class="sr-only">Toggle Dropdown</span>
+                    </button>
+                    <div class="dropdown-menu">
+                        <a class="dropdown-item" href="#" data-bind="click: $component.removeAssignment.bind($component, $data)">Delete</a>
+                        <a class="dropdown-item" href="#" data-bind="click: function() { $component.forkAssignment($data, true); }">Fork (prompt URL)</a>
+                        <a class="dropdown-item" href="#" data-bind="click: function() { $component.forkAssignment($data, false); }">Fork</a>
+                        <a class="dropdown-item" target="_blank" data-bind="attr: {href: $component.exportAssignmentUrl($data)}">Export Assignment</a>
+                        <a class="dropdown-item" target="_blank" data-bind="attr: {href: $component.submissionsUrl($data)}">View Submissions</a>
+                    </div>
+                </div>
+                <div class="text-right mt-1 assignment-flags">
+                    <!-- ko foreach: $component.assignmentFlags($data) -->
+                    <span class="badge status-badge" data-bind="text: $data"></span>
+                    <!-- /ko -->
+                </div>
+            </td>
+        </tr>
+        <!-- /ko -->
+        <!-- ko if: assignments.length === 0 -->
+        <tr>
+            <td colspan="4" class="text-muted small font-italic">No assignments here.</td>
+        </tr>
+        <!-- /ko -->
+    </tbody>
+    </table>
+</div>

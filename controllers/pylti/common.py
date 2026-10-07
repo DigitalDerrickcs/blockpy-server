@@ -2,7 +2,7 @@
 """
 Common classes and methods for PyLTI module
 """
-
+import sys
 import logging
 
 import oauth2
@@ -15,9 +15,11 @@ log = logging.getLogger('pylti.common')  # pylint: disable=invalid-name
 LTI_PROPERTY_LIST = [
     'oauth_consumer_key',
     'launch_presentation_return_url',
+    'launch_presentation_document_target',
     'launch_presentation_width',
     'launch_presentation_height',
-    #'user_id',
+    'user_id',
+    'user_image',
     'oauth_nonce',
     'context_label',
     'context_id',
@@ -40,7 +42,20 @@ LTI_PROPERTY_LIST = [
     'ext_content_return_types',
     'ext_content_intended_use',
     'ext_content_return_url',
-    'ext_content_file_extensions'
+    'ext_content_file_extensions',
+    'custom_canvas_api_domain',
+    'custom_canvas_base_url',
+    'custom_canvas_assignment_dueat_iso',
+    'custom_canvas_assignment_lockat_iso',
+    'custom_canvas_assignment_unlockat_iso',
+    'custom_canvas_assignment_id',
+    'custom_canvas_assignment_title',
+    'custom_canvas_course_id',
+    'custom_canvas_enrollment_state',
+    'custom_canvas_points_possible',
+    'custom_canvas_user_id',
+    'custom_canvas_user_login_id',
+    'custom_canvas_workflow_state',
 ]
 
 
@@ -228,7 +243,7 @@ def post_message(consumers, lti_key, url, body):
 
     is_success = b"<imsx_codeMajor>success</imsx_codeMajor>" in content
     log.debug("is success %s", is_success)
-    return is_success
+    return is_success, content
 
 
 def post_message2(consumers, lti_key, url, body,
@@ -306,20 +321,23 @@ def verify_request_common(consumers, url, method, headers, params):
             raise oauth2.Error('Invalid consumer.')
         oauth_server.verify_request(oauth_request, consumer, None)
     except oauth2.Error as e:
-        print("ERR", e.message)
+        #print("ERR", e.message)
         # Rethrow our own for nice error handling (don't print
         # error message as it will contain the key
-        raise LTIException("OAuth error: Please check your key and secret")
+        raise LTIException(f"OAuth error: {e.message}").with_traceback(sys.exc_info()[2])
 
     return True
 
 
 def generate_request_xml(message_identifier_id, operation,
-                         lis_result_sourcedid, score, message=None, url=False):
+                         lis_result_sourcedid, score=None, message=None, url=False, needs_review=False,
+                         when_submitted_at: str=None, overwrite_human_grades=False):
     # pylint: disable=too-many-locals
     """
     Generates LTI 1.1 XML for posting result to LTI consumer.
 
+    :param when_submitted_at:
+    :type when_submitted_at: str
     :param message_identifier_id:
     :param operation:
     :param lis_result_sourcedid:
@@ -339,6 +357,14 @@ def generate_request_xml(message_identifier_id, operation,
     message_identifier.text = message_identifier_id
     body = etree.SubElement(root, 'imsx_POXBody')
     xml_request = etree.SubElement(body, '%s%s' % (operation, 'Request'))
+    submission = etree.SubElement(xml_request, 'submissionDetails')
+    if needs_review:
+        etree.SubElement(submission, 'needsAdditionalReview')
+    if when_submitted_at is not None:
+        submitted_at_node = etree.SubElement(submission, 'submittedAt')
+        submitted_at_node.text = when_submitted_at
+    if overwrite_human_grades:
+        etree.SubElement(submission, 'prioritizeNonToolGrade')
     record = etree.SubElement(xml_request, 'resultRecord')
 
     guid = etree.SubElement(record, 'sourcedGUID')
@@ -354,13 +380,33 @@ def generate_request_xml(message_identifier_id, operation,
         text_string.text = score.__str__()
         if message is not None:
             result_data = etree.SubElement(result, 'resultData')
-            text_node = etree.SubElement(result_data, 'url' if url else 'text')
+            text_node = etree.SubElement(result_data, 'ltiLaunchUrl' if url else 'text')
             text_node.text = message
     ret = "<?xml version='1.0' encoding='utf-8'?>\n{}".format(
         etree.tostring(root, encoding='utf-8').decode('utf-8'))
-
+    #print(ret)
     log.debug("XML Response: \n%s", ret)
     return ret
+
+def parse_read_result(xml_response):
+    """
+    Parses XML response from LTI consumer
+
+    :param xml_response: xml response
+    :return: score
+    """
+    tree = etree.fromstring(xml_response)
+    log.debug("tree %s", tree)
+    result = tree.find('.//{http://www.imsglobal.org/services/ltiv1p1/xsd/'
+                       'imsoms_v1p0}resultScore')
+    if result is None:
+        return None
+    text_string = result.find(
+        '{http://www.imsglobal.org/services/ltiv1p1/xsd/imsoms_v1p0}'
+        'textString')
+    if text_string is None:
+        return None
+    return text_string.text
 
 class SignatureMethod_HMAC_SHA1_Unicode(oauth2.SignatureMethod_HMAC_SHA1):
     """

@@ -1,0 +1,48 @@
+{% import 'helpers/report_tools.html' as report_tools %}
+
+{% set hiding = assignment.hidden or assignment.get_setting('hide_submission', False) %}
+
+<div xml:lang="en">
+    <h2 id='{{ assignment.slug() }}'>Reading {{ assignment.name }}</h2>
+{% if is_grader or not hiding %}
+    <a href="{{ url_for('assignments.load_reading', path=assignment.url, embed=True) }}" target="_blank">View reading</a>
+{% endif %}
+
+{{ report_tools.render_submission_details(submission, is_grader, hiding) }}
+
+{% if is_grader or not hiding %}
+    <div>Full Submission: <a href="{{ url_for('blockpy.load_assignment',
+                            assignment_id=submission.assignment_id,
+                            user_id=submission.user_id,
+                            course_id=submission.course_id,
+                            force_download=True,
+                            embed=True) }}">download</a></div>
+    <div>History: <a href="{{ url_for('blockpy.browse_history', assignment_id=submission.assignment_id,
+        user_id=submission.user_id, course_id=submission.course_id) }}">view</a></div>
+{% if submission.code %}
+    <div id="reviewable-code-area-{{ submission.id }}">Submitted code:<br>
+        {{ submission.code|highlight_python_code|safe }}
+        {% if submission.extra_files %}
+            {% for filename, contents in (submission.extra_files|json_load).items() %}
+                <strong>{{ filename }}</strong>
+                {{ contents|highlight_python_code|safe }}
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    {% endif %}
+{% endif %}
+{% if is_grader %}
+    <div>
+    {{ report_tools.render_metrics(submission, True, False) }}
+    </div>
+
+    <div><small>
+        Submission: {{ submission.id }},
+        Assignment: {{ submission.assignment_id }} ({{ submission.assignment.name }}),
+        User: {{ submission.user_id }} ({{ submission.user.name() }}),
+        Course: {{ submission.course_id }} ({{ submission.course.name }})
+    </small></div>
+
+{% endif %}
+</div>

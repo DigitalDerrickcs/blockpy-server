@@ -1,0 +1,50 @@
+{% extends 'helpers/layout.html' %}
+{% import 'helpers/navigation.html' as navigation %}
+
+{% block title %}
+Textbook: {{ course.name }}
+{% endblock %}
+
+{% block statusbar %}
+{% endblock %}
+
+{% block extrahead %}
+
+{% endblock %}
+
+{% block body %}
+
+    <h1>Textbook: {{ course.name }}</h1>
+    {{ navigation.navigate_course(course_id) }}
+
+    <div class="list-group">
+    {% for group, assignments in groups.items()|selectattr(0) %}
+        {% set has_multiple = assignments|selectattr('type', 'equalto', 'reading')|list|length > 1 %}
+        {% if has_multiple %}
+            <div class="list-group-item">{{ group.name }}
+                <ul>
+                    {% for assignment in assignments %}
+                        {% if assignment.public and assignment.type == 'reading' %}
+                            <li>
+                                <a href="{{ url_for('assignments.load_reading', path=assignment.url, embed=True) }}"
+                                   id='{{ assignment.slug() }}'
+                                   target="_blank">{{ assignment.name }}</a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                </ul>
+            </div>
+        {% else %}
+            {% for assignment in assignments %}
+                {% if assignment.public and assignment.type == 'reading' %}
+                    <a href="{{ url_for('assignments.load_reading', path=assignment.url, embed=True) }}"
+                       id='{{ assignment.slug() }}'
+                        class="list-group-item"
+                       target="_blank">{{ group.name }}</a>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+    {% endfor %}
+    </div>
+
+{% endblock %}

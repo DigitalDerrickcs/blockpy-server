@@ -7,53 +7,154 @@
 
 {% block extrahead %}
 <script>
+
+    {% if assignment_id_focus %}
+        $(document).ready(function() {
+            $('html, body').animate({
+                scrollTop: $("#assignment-id-{{ assignment_id_focus }}").offset().top
+            }, 100);
+        });
+    {% endif %}
+
+    let loggedInUser = {{ viewer.encode_json()|tojson }};
+    let userIds = {{  request.values.get('user_ids')|tojson }} || frontend.getLocalStorage("BLOCKPY_SERVER_USERIDS", "");
+    let assignmentIds = {{  request.values.get('assignment_ids')|tojson }} || frontend.getLocalStorage("BLOCKPY_SERVER_ASSIGNMENTIDS", "first");
+    let group = {{ assignment_group.encode_json()|tojson }};
+    let assignments = [], submissions = [];
+
     $(function() {
-        let userIds = {{  request.values.get('user_ids')|tojson }} || getLocalStorage("BLOCKPY_SERVER_USERIDS", "");
-        let assignmentIds = {{  request.values.get('assignment_ids')|tojson }} || getLocalStorage("BLOCKPY_SERVER_ASSIGNMENTIDS", "first");
-        console.log(userIds, assignmentIds);
-        ko.applyBindings({
+        server = new frontend.Server({{ course_id|tojson }}, {
+        }, {
+            users: [loggedInUser],
+            groups: [group]
+        });
+        mainModel = {
             pageCourseId: {{ course_id|tojson }},
             userIds: userIds,
-            assignmentIds: assignmentIds
-        });
+            assignmentIds: assignmentIds,
+            server: server,
+            group: group,
+            user: loggedInUser,
+            submissions: []
+        }
+        ko.applyBindings(mainModel);
     });
 </script>
 {% endblock %}
 
+{% set reduced_layout = embed or 'iframe' == request.form.get('launch_presentation_document_target') %}
+
 {% block body %}
 
+    {% if not reduced_layout %}
     <h1>Submissions</h1>
-    {{ navigation.navigate_course() }}
+    {{ navigation.navigate_course(course_id) }}
+    {% endif %}
 
+<h1 id="overview">Overview</h1>
+    
     <assignment-group params="group: group"></assignment-group>
-    <watcher params="courseId: pageCourseId, group: group, user: user, submissions: submissions"></watcher>
 
-<h1>Overview</h1>
-<div>Status: {{ points_total }}/{{ points_possible }} problems</div>
-<div>Score: {{ score*100 }}%</div>
+    <p>
+    {% if reduced_layout %}
+        Below, you can see your current submission for this assignment.<br>
+        If you would like to continue attempting the assignment,
+        you should return to the assignment from the Modules tab (if the assignment is not past its lock date).
+        {% if referer %}
+            This <a href="{{referer}}" target="_blank">direct link to the assignment</a> may work too.
+        {% endif %}
+    {% endif %}
+    </p>
+
+    <div>
+        {% if is_grader or not any_hidden %}
+            <div>Overall Status: {{ points_total }}/{{ points_possible }} problems</div>
+            <div>Total Score: {{ score*100 }}%</div>
+            {% if any_late_penalties %}
+                <div>Some submissions were late, and points may have been deducted.
+                See <a href="#late-penalties">Late Penalties</a> for details.
+                </div>
+            {% endif %}
+        {% else %}
+            <div>Total Status/Score Hidden in this view because you are not a grader.</div>
+        {% endif  %}
+    </div>
+
 <div>Contents:
     <ol>
         {% for assignment, submission in group %}
-            <li><a href='#{{ assignment.slug() }}'>{{ assignment.name }}</a> - {{ submission.full_status() }}</li>
+            <li><a href='#{{ assignment.slug() }}'>{{ assignment.name }}</a> - {{ submission.full_status(not is_grader) }}</li>
         {% endfor %}
     </ol>
 </div>
+{% if any_late_penalties %}
+<div>
+    <h2 id="late-penalties" name="late-penalties">Late Penalties</h2>
+    <p>
+        The following late penalties were applied to your score:
+        <ol>
+        {% for assignment, submission in group %}
+            {% if all_explanations[assignment.id] %}
+                <li>{{ assignment.name }}:
+                    {% if all_explanations[assignment.id]|length > 1 %}
+                    <details>
+                        <summary>{{ all_explanations[assignment.id][0] }}</summary>
+                        <ul>
+                            {% for explanation in all_explanations[assignment.id][1:] %}
+                                <li>{{ explanation }}</li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                    {% else %}
+                        {{ all_explanations[assignment.id][0] }}
+                    {% endif %}
+                </li>
+            {% endif %}
+        {% endfor %}
+        </ol>
+    </p>
+</div>
+{% endif %}
 <div>
     {% for assignment, submission in group %}
+        <a id="assignment-id-{{ assignment.id }}"></a>
         {% if assignment.type.lower() == "blockpy" %}
             {% include "reports/blockpy.html" with context %}
         {% elif assignment.type.lower() == "maze" %}
             {% include "reports/maze.html" with context %}
+        {% elif assignment.type.lower() == "reading" %}
+            {% include "reports/reading.html" with context %}
+        {% elif assignment.type.lower() == "quiz" %}
+            {% include "reports/quiz.html" with context %}
+        {% elif assignment.type.lower() == "java" %}
+            {% include "reports/java.html" with context %}
+        {% elif assignment.type.lower() == "textbook" %}
+            {% include "reports/textbook.html" with context %}
+        {% elif assignment.type.lower() == "typescript" %}
+            {% include "reports/typescript.html" with context %}
+        {% elif assignment.type.lower() == "explain" %}
+            {% include "reports/explains.html" with context %}
+        {% elif assignment.type.lower() == "feedback" %}
+            {% include "reports/feedback.html" with context %}
+        {% else %}
+            Unknown assignment type.
         {% endif %}
     {% endfor  %}
 </div>
 <div>
+<hr>
     <small>
         User: {{ user_id }}<br>
         Course: {{ course_id }}<br>
-        Assignments: {{ assignments|join(',', attribute='id') }}<br>
-        Submissions: {{ submissions|join(',', attribute='id') }}
+        Assignments: {{ group|join(',', attribute='0.id') }}<br>
+        Submissions: {{ group|join(',', attribute='1.id') }}<br>
+        <a href="#overview">Back to Overview</a>
     </small>
 </div>
+    {% if assignment_id_focus %}
+        <div>
+            Target assignment ID was: <code>{{ assignment_id_focus }}</code>
+        </div>
+    {% endif %}
 
 {% endblock %}

@@ -4,46 +4,51 @@ Flask Configuration File
 Checks for a "secrets.json" file and uses that to add in private settings such as Secret Key.
 """
 import os
-import json
+from datetime import timedelta
 
-try:
-    with open('settings/secrets.json', 'r') as secret_file:
-        secrets = json.load(secret_file)
-except IOError:
-    print("No secrets file found. Using insecure defaults.")
-    secrets = {}
 
-EMAIL_SECRETS = secrets.get("EMAIL", {})
-DB_SECRETS = secrets.get("DATABASE", {})
-
-class Config(object):
-    IS_PRODUCTION = secrets.get('PRODUCTION', False)
-    SHOW_ABOUT_PAGE = secrets.get("SHOW_ABOUT_PAGE", True)
-    SITE_VERSION = 5
-    DEBUG = False
-    TESTING = False
-    CSRF_ENABLED = True
-    WTF_CSRF_ENABLED = True
-    SITE_NAME = secrets.get('SITE_NAME', 'BlockPy Public')
-    SYS_ADMINS = secrets.get('SYS_ADMINS', ['Unknown'])
+class DefaultConfig:
+    """
+    General settings for all configurations
+    """
+    # Meta Site Data
+    SITE_NAME = 'BlockPy Public'
+    SYS_ADMINS = ['Unknown']
+    SHOW_ABOUT_PAGE = True
+    SITE_VERSION = 6
+    PREFERRED_LOGIN_URL = None
+    # Testing and Dev
+    DEBUG = True
+    TESTING = True
+    PROFILE_RUNTIME = False
+    # Filesystem settings
     ROOT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
     STATIC_DIRECTORY = os.path.join(ROOT_DIRECTORY, 'static')
     UPLOADS_DIR = os.path.join(STATIC_DIRECTORY, 'uploads')
-    # TODO: Pretty sure a lot of this logging is messed up - need to fix it.
+    REPORT_DIR = os.path.join(STATIC_DIRECTORY, 'reports')
     BLOCKPY_LOG_DIR = os.path.join(ROOT_DIRECTORY, 'logs')
+    TIMING_LOG_DIR = os.path.join(ROOT_DIRECTORY, 'logs', 'timing')
     ERROR_FILE_PATH = os.path.join(ROOT_DIRECTORY, 'logs', 'blockpy_errors.log')
     EVENTS_FILE_PATH = os.path.join(ROOT_DIRECTORY, 'logs', 'blockpy_events.log')
-    # TODO: This is for API access with Canvas - nothing actually needs it yet.
-    COURSE_TOKENS = os.path.join(ROOT_DIRECTORY, 'settings/course_tokens.yaml')
+    TASKS_FILE_PATH = os.path.join(ROOT_DIRECTORY, 'logs', 'blockpy_tasks.log')
+    CANVAS_DIR = os.path.join(STATIC_DIRECTORY, 'canvas', 'courses')
+    API_DOCUMENTATION_PATH = "./models/generated/openapi.json"
+    # Library Files
+    LIB_PEDAL_DIR = os.path.join(STATIC_DIRECTORY, 'libs', 'pedal')
+    LIB_CURRICULUM_CTVT_DIR = os.path.join(STATIC_DIRECTORY, 'libs', 'pedal')
+    LIB_CURRICULUM_SNEKS_DIR = os.path.join(STATIC_DIRECTORY, 'libs', 'pedal')
+    LIB_DESIGNER_DIR = os.path.join(STATIC_DIRECTORY, 'libs', 'designer')
+    LIB_DRAFTER_DIR = os.path.join(STATIC_DIRECTORY, 'libs', 'drafter')
+    LIB_BLOCKPY_DIR = os.path.join(STATIC_DIRECTORY, 'libs', 'blockpy')
+    # External files settings
+    BLOCKPY_SOURCE_DIR = None
+    CORGIS_URL = "https://corgis-edu.github.io/corgis/datasets/"
 
-    BLOCKPY_SOURCE_DIR = secrets.get('BLOCKPY_SOURCE_DIR')
-    CANVAS_DIR = os.path.join(STATIC_DIRECTORY, 'canvas/courses/')
-    CORGIS_URL = secrets.get("CORGIS_URL", None)
+    # Default App Settings
+    # Maximum student code size (Defaults to 750kb)
+    MAXIMUM_CODE_SIZE = 750 * 1024
 
-    MAXIMUM_CODE_SIZE = secrets.get("MAXIMUM_CODE_SIZE", 500 * 1024) # Defaults to 500kb
-
-    PREFERRED_LOGIN = secrets.get("PREFERRED_LOGIN", None)
-
+    # Session settings
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'None'
@@ -51,52 +56,92 @@ class Config(object):
     REMEMBER_COOKIE_SECURE = True
     COOKIE_SAMESITE = 'None'
 
-    # secret key for flask authentication
-    SECRET_KEY = secrets.get('FLASK_SECRET_KEY', 'flask-secret-key')
+    # TODO: This is for API access with Canvas - nothing actually needs it yet.
+    COURSE_TOKENS = os.path.join(ROOT_DIRECTORY, 'settings/course_tokens.yaml')
 
-    PYLTI_CONFIG = {
-        "consumers": {
-            secrets.get("CONSUMER_KEY", "__consumer_key__"): {
-                "secret": secrets.get("CONSUMER_KEY_SECRET", "__lti_secret__"),
-                "cert": secrets.get("CONSUMER_KEY_PEM_FILE", "consumer_cert.pem"),
-                "certkey": secrets.get("CONSUMER_KEY_CERT", "consumer_key.pem")
-            }
-        }
-    }
+    # Debug toolbar settings
+    DEBUG_TB_INTERCEPT_REDIRECTS = False
 
-    # configured for GMAIL
-    MAIL_SERVER = EMAIL_SECRETS.get('SERVER')
-    MAIL_PORT = EMAIL_SECRETS.get('PORT')
-    MAIL_USE_SSL = EMAIL_SECRETS.get('USE_SSL')
-    #MAIL_USE_TSL = EMAIL_SECRETS.get('USE_TSL')
-    MAIL_USERNAME = EMAIL_SECRETS.get("USERNAME")
-    MAIL_PASSWORD = EMAIL_SECRETS.get("PASSWORD")
-    SECURITY_EMAIL_SENDER = EMAIL_SECRETS.get("SENDER")
+    # configured for Gmail by default
+    MAIL_SERVER = "smtp.gmail.com"
+    MAIL_PORT = 465
+    MAIL_USE_SSL = True
+    SECURITY_EMAIL_SENDER = "BlockPy Administrator"
 
+    # User Registration Stuff
     SECURITY_CONFIRMABLE = False
     SECURITY_REGISTERABLE = True
     SECURITY_RECOVERABLE = True
     SECURITY_CHANGEABLE = True
+    SECURITY_TRACKABLE = True
     SECURITY_URL_PREFIX = '/users'
     SECURITY_POST_LOGIN_VIEW = "/blockpy"
     SECURITY_POST_CONFIRM_VIEW = "/blockpy"
     SECURITY_PASSWORD_HASH = 'bcrypt'
-    SECURITY_PASSWORD_SALT = secrets.get('SECURITY_PASSWORD_SALT')
     SECURITY_DEFAULT_REMEMBER_ME = True
+    # enforce CSRF protection for session / browser - but allow token-based
+    # API calls to go through
+    SECURITY_CSRF_PROTECT_MECHANISMS = ["session", "basic"]
+    SECURITY_CSRF_IGNORE_UNAUTH_ENDPOINTS = True
+    # Security settings
+    CSRF_ENABLED = True
+    WTF_CSRF_ENABLED = True
+    # Send Cookie with csrf-token. This is the default for Axios and Angular.
+    SECURITY_CSRF_COOKIE_NAME = "XSRF-TOKEN"
+    WTF_CSRF_CHECK_DEFAULT = False
+    WTF_CSRF_TIME_LIMIT = None
+
+    # SQLAlchemy settings
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Flask JWT Extended
+    # Need to check json/query_string for opening URLs on the page (JWT has to be passed manually)
+    JWT_TOKEN_LOCATION = ["headers", "cookies", "json", "query_string"]
+    JWT_COOKIE_SAMESITE = 'None'
+    JWT_COOKIE_SECURE = True
+    # If this is too low, could set to 30 days
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=30)
 
-class ProductionConfig(Config):
+    # Task Settings
+    TASK_DB_URI: str
+    TASK_QUEUE_STYLE: str
+    TASK_DB_SETTINGS: dict = {}
+
+    # Logs
+    ROTATE_LOGS = False
+
+    # Force https URLs
+    PREFERRED_URL_SCHEME = 'https'
+
+    USE_PROXY_FIX = True
+
+
+class ProductionConfig(DefaultConfig):
+    """
+    General settings for production mode
+    """
     DEBUG = False
     PORT = 5001
-    SQLALCHEMY_DATABASE_URI = (DB_SECRETS.get('ACCESS_URL')
-                               .format(username=DB_SECRETS.get('USER'),
-                                       password=DB_SECRETS.get('PASS')))
+    TASK_QUEUE_STYLE = "redis"
+    ROTATE_LOGS = True
 
 
-class TestingConfig(Config):
+class DevelopmentConfig(DefaultConfig):
+    """
+    General settings for local development
+    """
     DEBUG = True
-    PORT = 5001
     HOST = 'localhost'
     SITE_ROOT_URL = 'localhost:5001'
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///database/main.db'
+    TASK_QUEUE_STYLE = 'sqlite'
+    TASK_DB_URI = 'instance/tasks.db'
+    SQLALCHEMY_DATABASE_URI = 'sqlite:///../instance/main.db'
+    SQLALCHEMY_DATABASE_URI_ALEMBIC = 'sqlite:///instance/main.db'
+
+
+class TestConfig(DefaultConfig):
+    """ Simple test config with in-memory database """
+    TESTING = True
+    HOST = 'localhost'
+    SITE_ROOT_URL = 'localhost:5001'
+    TASK_QUEUE_STYLE = 'sqlite'
